@@ -1,11 +1,11 @@
 """
-LethalLevelLoader.cfg reset tool.
+copied_lethallevelloader.cfg reset tool.
 
 How to use:
     1. Edit the flags in the CONFIG section below.
     2. Run this script: python reset_tool.py
-    3. The original LethalLevelLoader.cfg is never modified - the result is
-       written to a new file instead (see OUTPUT_CFG_PATH).
+    3. The original copied_lethallevelloader.cfg is never modified - the result
+       is written to a new file instead (see OUTPUT_CFG_PATH).
 
 Features:
     - RESET_ALL_TO_DEFAULT: reset every setting back to the value listed in
@@ -27,7 +27,7 @@ RESET_ALL_TO_DEFAULT = True
 
 # ============================================================
 
-SOURCE_CFG_PATH = Path(__file__).resolve().parent / "LethalLevelLoader.cfg"
+SOURCE_CFG_PATH = Path(__file__).resolve().parent / "copied_lethallevelloader.cfg"
 OUTPUT_CFG_PATH = SOURCE_CFG_PATH.with_name("LethalLevelLoader.reset.cfg")
 
 # Matches a "Key = Value" setting line (non-greedy key, since values may

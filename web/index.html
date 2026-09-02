@@ -12,16 +12,34 @@
   </header>
 
   <section id="toolbar">
-    <label class="checkbox">
-      <input type="checkbox" id="resetToDefault">
-      Reset all settings to default
-    </label>
-    <label class="checkbox">
-      <input type="checkbox" id="cleanReferences">
-      Remove references to uninstalled levels
-    </label>
+    <button id="resetBtn">Reset to Default</button>
+    <button id="cleanBtn">Clean Uninstalled References</button>
     <button id="downloadBtn">Download .cfg</button>
     <span id="status"></span>
+  </section>
+
+  <section id="cfgOptions">
+    <label class="checkbox">
+      <input type="checkbox" id="injectDynamicToggle">
+      Inject Dynamic Matching Weights
+    </label>
+  </section>
+
+  <section id="balancePanel">
+    <button id="toggleBalanceBtn">Balance Interior Weights &#9662;</button>
+    <div id="balanceBody" hidden>
+      <p class="subtitle">Target "chance of landing in any modded interior" per level. Applies instantly using the current weights and toggle above.</p>
+      <table id="balanceTable">
+        <thead>
+          <tr>
+            <th>Level</th>
+            <th>Target Modded %</th>
+          </tr>
+        </thead>
+        <tbody id="balanceTableBody"></tbody>
+      </table>
+      <button id="applyBalanceBtn">Apply Balance</button>
+    </div>
   </section>
 
   <section id="pagination">
@@ -40,6 +58,25 @@
       </tr>
     </thead>
     <tbody id="weightsBody"></tbody>
+  </table>
+
+  <h2>Interior Weights by Level</h2>
+  <section id="levelPagination">
+    <button id="prevLevelBtn">&laquo; Prev</button>
+    <select id="levelSelect"></select>
+    <button id="nextLevelBtn">Next &raquo;</button>
+    <span id="levelPageLabel"></span>
+  </section>
+
+  <table id="levelWeightsTable">
+    <thead>
+      <tr>
+        <th>Interior</th>
+        <th>Weight</th>
+        <th>Odds for this level</th>
+      </tr>
+    </thead>
+    <tbody id="levelWeightsBody"></tbody>
   </table>
 
   <script src="/app.js"></script>

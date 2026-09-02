@@ -28,7 +28,12 @@ header h1 {
   color: #9d9d9d;
 }
 
-#toolbar, #pagination {
+h2 {
+  font-size: 1.1rem;
+  margin: 1.5rem 0 0.75rem 0;
+}
+
+#toolbar, #pagination, #cfgOptions, #balancePanel, #levelPagination {
   display: flex;
   align-items: center;
   gap: 1rem;
@@ -38,6 +43,36 @@ header h1 {
   border-radius: 6px;
   margin-bottom: 1rem;
   flex-wrap: wrap;
+}
+
+#balancePanel {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+#balanceBody {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+#balanceBody[hidden] {
+  display: none;
+}
+
+#balanceTable {
+  max-width: 24rem;
+}
+
+#balanceTable input[type="number"] {
+  width: 5rem;
+}
+
+#applyBalanceBtn {
+  align-self: flex-start;
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  font-weight: 600;
 }
 
 .checkbox {

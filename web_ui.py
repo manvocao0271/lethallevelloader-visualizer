@@ -270,9 +270,14 @@ def build_data_payload() -> dict[str, object]:
         (s for s in sections if s.category.strip(" -") == "LethalLevelLoader Settings"), None
     )
     inject_dynamic_weights = True
+    inject_dynamic_weights_default = True
     if settings_section is not None:
         inject_dynamic_weights = (
             settings_section.current("Inject Dynamic Matching Weights", "true").strip().lower() == "true"
+        )
+        inject_dynamic_weights_default = (
+            settings_section.fields.get("Inject Dynamic Matching Weights", ("true", "true"))[1].strip().lower()
+            == "true"
         )
 
     level_sections = [s for s in sections if s.category in ("Custom Level", "Vanilla Level")]
@@ -299,15 +304,32 @@ def build_data_payload() -> dict[str, object]:
         for name in level_order
     ]
 
+    # Each dungeon's documented "# Default value" for its Manual Level Names
+    # List, so the "Reset to default" button can restore weights live.
+    default_weights_payload: dict[str, list[dict[str, object]]] = {}
+    for dungeon in dungeon_sections:
+        default_raw = dungeon.fields.get(MANUAL_LEVEL_NAMES_KEY, ("", ""))[1]
+        default_pairs = parse_weight_pairs(default_raw)
+        default_weights_payload[dungeon.name] = [
+            {"level": name, "weight": default_pairs.get(name, 0.0)} for name in level_order
+        ]
+
     return {
         "levels": levels_payload,
         "dungeons": dungeons_payload,
         "injectDynamicWeights": inject_dynamic_weights,
+        "injectDynamicWeightsDefault": inject_dynamic_weights_default,
         "weights": weights,
+        "defaultWeights": default_weights_payload,
     }
 
 
-def build_download_cfg(reset_to_default: bool, clean_references: bool, weights: dict[str, list[dict[str, object]]]) -> str:
+def build_download_cfg(
+    reset_to_default: bool,
+    clean_references: bool,
+    inject_dynamic_weights: bool,
+    weights: dict[str, list[dict[str, object]]],
+) -> str:
     lines = SOURCE_CFG_PATH.read_text(encoding="utf-8").splitlines(keepends=True)
 
     if reset_to_default:
@@ -324,9 +346,7 @@ def build_download_cfg(reset_to_default: bool, clean_references: bool, weights: 
         if category in ("Custom Dungeon", "Vanilla Dungeon")
     }
 
-    # The edited weights are balanced assuming they're the only thing that
-    # decides odds; leaving dynamic tag-based weight injection on would add
-    # each dungeon's own fixed weight on top and throw that off.
+    # Match whatever the live UI toggle showed when the weights were edited.
     settings_section = next(
         (
             (start, end) for category, name, start, end in sections
@@ -336,8 +356,7 @@ def build_download_cfg(reset_to_default: bool, clean_references: bool, weights: 
     )
     if settings_section is not None:
         start, end = settings_section
-        if (get_field(lines, start, end, "Inject Dynamic Matching Weights") or "").strip().lower() != "false":
-            set_field(lines, start, end, "Inject Dynamic Matching Weights", "false")
+        set_field(lines, start, end, "Inject Dynamic Matching Weights", "true" if inject_dynamic_weights else "false")
 
     for interior_name, entries in weights.items():
         match = dungeon_by_name.get(interior_name.strip().lower())
@@ -399,6 +418,7 @@ class Handler(BaseHTTPRequestHandler):
             cfg_text = build_download_cfg(
                 bool(body.get("resetToDefault")),
                 bool(body.get("cleanReferences")),
+                bool(body.get("injectDynamicWeights", True)),
                 body.get("weights") or {},
             )
         except Exception as exc:  # noqa: BLE001 - surface any error to the browser

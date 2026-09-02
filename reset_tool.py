@@ -1,10 +1,11 @@
 """
-LethalLevelLoader.cfg management tool.
+LethalLevelLoader.cfg reset tool.
 
 How to use:
     1. Edit the flags in the CONFIG section below.
-    2. Run this script: python cfg_tool.py
-    3. A timestamped backup of the .cfg is created before any changes are made.
+    2. Run this script: python reset_tool.py
+    3. The original LethalLevelLoader.cfg is never modified - the result is
+       written to a new file instead (see OUTPUT_CFG_PATH).
 
 Features:
     - RESET_ALL_TO_DEFAULT: reset every setting back to the value listed in
@@ -14,21 +15,20 @@ Features:
 from __future__ import annotations
 
 import re
-import shutil
-from datetime import datetime
 from pathlib import Path
 
 # ============================================================
 # CONFIG - toggle features here, then run the script
 # ============================================================
 
-# Set to True to reset every setting in the .cfg back to the default value
-# listed in its "# Default value:" comment.
+# Set to True to write a copy of the .cfg with every setting reset back to
+# the default value listed in its "# Default value:" comment.
 RESET_ALL_TO_DEFAULT = True
 
 # ============================================================
 
-CFG_PATH = Path(__file__).resolve().parent / "LethalLevelLoader.cfg"
+SOURCE_CFG_PATH = Path(__file__).resolve().parent / "LethalLevelLoader.cfg"
+OUTPUT_CFG_PATH = SOURCE_CFG_PATH.with_name("LethalLevelLoader.reset.cfg")
 
 # Matches a "Key = Value" setting line (non-greedy key, since values may
 # themselves contain " = ").
@@ -37,17 +37,11 @@ SETTING_LINE_RE = re.compile(r"^(?P<key>.+?) = (?P<value>.*)$")
 DEFAULT_COMMENT_RE = re.compile(r"^# Default value:\s?(?P<default>.*)$")
 
 
-def make_backup(path: Path) -> Path:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = path.with_name(f"{path.stem}.backup_{timestamp}{path.suffix}")
-    shutil.copy2(path, backup_path)
-    return backup_path
-
-
-def reset_all_to_default(path: Path) -> int:
-    """Rewrite every setting line to use the default value found in its
-    preceding "# Default value:" comment. Returns the number of settings changed."""
-    raw = path.read_text(encoding="utf-8")
+def reset_all_to_default(source_path: Path, output_path: Path) -> int:
+    """Write output_path as a copy of source_path with every setting line
+    reset to the default value found in its preceding "# Default value:"
+    comment. Returns the number of settings changed."""
+    raw = source_path.read_text(encoding="utf-8")
     lines = raw.splitlines(keepends=True)
 
     pending_default = None
@@ -75,19 +69,17 @@ def reset_all_to_default(path: Path) -> int:
                 changed += 1
         pending_default = None
 
-    path.write_text("".join(lines), encoding="utf-8")
+    output_path.write_text("".join(lines), encoding="utf-8")
     return changed
 
 
 def main() -> None:
-    if not CFG_PATH.exists():
-        raise FileNotFoundError(f"Could not find config file at {CFG_PATH}")
+    if not SOURCE_CFG_PATH.exists():
+        raise FileNotFoundError(f"Could not find config file at {SOURCE_CFG_PATH}")
 
     if RESET_ALL_TO_DEFAULT:
-        backup_path = make_backup(CFG_PATH)
-        print(f"Backed up current config to: {backup_path.name}")
-        changed = reset_all_to_default(CFG_PATH)
-        print(f"Reset {changed} setting(s) to their default value.")
+        changed = reset_all_to_default(SOURCE_CFG_PATH, OUTPUT_CFG_PATH)
+        print(f"Wrote {OUTPUT_CFG_PATH.name} with {changed} setting(s) reset to default.")
     else:
         print("No action taken. Set RESET_ALL_TO_DEFAULT = True in this script to reset all settings.")
 

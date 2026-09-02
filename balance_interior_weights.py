@@ -36,6 +36,10 @@ WEIGHTS_JSON_PATH = Path(__file__).resolve().parent / "interior_weights.json"
 ZERO_WIDTH_SPACE = "\u200b"
 SECTION_HEADER_RE = re.compile(r"^\[(?P<inner>.*)\]\s*$")
 LEADING_NUMBER_RE = re.compile(r"^\d+\s+")
+SETTING_LINE_RE = re.compile(r"^(?P<key>.+?) = (?P<value>.*)$")
+DEFAULT_COMMENT_RE = re.compile(r"^# Default value:\s?(?P<default>.*)$")
+PAIR_RE = re.compile(r"^(?P<name>.+):(?P<weight>-?\d+(?:\.\d+)?)$")
+DYNAMIC_LEVEL_TAGS_KEY = "Dungeon Injection Settings - Dynamic Level Tags List"
 
 # ============================================================
 # CONFIG - edit percentages here, then run the script
@@ -71,7 +75,40 @@ DEFAULT_MODDED_LEVEL_MODDED_CHANCE_PERCENT = 50
 # well-defined instead of dividing by zero).
 FALLBACK_VANILLA_WEIGHT_WHEN_ZERO = 100
 
+# The percentages above only hold if nothing else adds extra weight on top
+# of the manual weights this script controls. copied_lethallevelloader.cfg's
+# "Inject Dynamic Matching Weights" setting (if left on) adds each modded
+# dungeon's own fixed "Dynamic Level Tags List" weight on top, which can
+# make low target percentages mathematically unreachable. set_interior_
+# weights_tool.py and web_ui.py both force that setting to false in their
+# generated output, so this assumes the same and ignores dynamic tag
+# weights entirely. Set to False if you intend to leave dynamic injection
+# enabled in your generated cfg instead - this script will then account for
+# each dungeon's dynamic tag weight when computing targets.
+ASSUME_DYNAMIC_INJECTION_DISABLED = True
+
 # ============================================================
+
+
+class Section:
+    def __init__(self, category: str, name: str):
+        self.category = category
+        self.name = name
+        self.fields: dict[str, tuple[str, str]] = {}  # key -> (current, default)
+
+    def current(self, key: str, fallback: str = "") -> str:
+        value, _ = self.fields.get(key, (fallback, fallback))
+        return value
+
+    def effective(self, key: str) -> str:
+        """Value that actually applies: the override if content
+        configuration is enabled for this section, else the default."""
+        current, default = self.fields.get(key, ("", ""))
+        return current if self.is_enabled() else default
+
+    def is_enabled(self) -> bool:
+        current, _ = self.fields.get("Enable Content Configuration", ("false", "false"))
+        return current.strip().lower() == "true"
 
 
 def parse_header(header_line: str) -> tuple[str, str]:
@@ -89,13 +126,52 @@ def parse_header(header_line: str) -> tuple[str, str]:
     return (category.strip(), name)
 
 
-def parse_section_headers(path: Path) -> list[tuple[str, str]]:
-    """Return (category, name) for every section header in the cfg."""
-    headers = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+def parse_sections(path: Path) -> list[Section]:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    sections: list[Section] = []
+    pending_default = None
+
+    for line in lines:
         if SECTION_HEADER_RE.match(line):
-            headers.append(parse_header(line))
-    return headers
+            category, name = parse_header(line)
+            sections.append(Section(category, name))
+            pending_default = None
+            continue
+
+        default_match = DEFAULT_COMMENT_RE.match(line)
+        if default_match:
+            pending_default = default_match.group("default")
+            continue
+
+        if not line.strip() or line.startswith("#"):
+            continue
+
+        setting_match = SETTING_LINE_RE.match(line)
+        if setting_match and sections:
+            key = setting_match.group("key")
+            value = setting_match.group("value")
+            default_value = pending_default if pending_default is not None else value
+            sections[-1].fields[key] = (value, default_value)
+        pending_default = None
+
+    return sections
+
+
+def parse_weight_pairs(raw: str) -> dict[str, float]:
+    """Parse a "Name:Weight,Name2:Weight2" list into a dict. Unparseable
+    entries (e.g. "Default Values Were Empty") are silently skipped."""
+    weights: dict[str, float] = {}
+    for chunk in raw.split(","):
+        match = PAIR_RE.match(chunk.strip())
+        if match:
+            weights[match.group("name").strip()] = float(match.group("weight"))
+    return weights
+
+
+def level_tags(category: str) -> set[str]:
+    if category.startswith("Vanilla"):
+        return {"Vanilla"}
+    return {"Custom", "Modded"}
 
 
 def to_json_number(weight: float):
@@ -133,11 +209,33 @@ def main() -> None:
     if not WEIGHTS_JSON_PATH.exists():
         raise FileNotFoundError(f"Could not find weights JSON file at {WEIGHTS_JSON_PATH}")
 
-    headers = parse_section_headers(SOURCE_CFG_PATH)
+    sections = parse_sections(SOURCE_CFG_PATH)
+    headers = [(s.category, s.name) for s in sections]
     vanilla_dungeon_names = {name for category, name in headers if category == "Vanilla Dungeon"}
     modded_dungeon_names = {name for category, name in headers if category == "Custom Dungeon"}
     vanilla_level_names = {name for category, name in headers if category == "Vanilla Level"}
     modded_level_names = {name for category, name in headers if category == "Custom Level"}
+
+    settings_section = next(
+        (s for s in sections if s.category.strip(" -") == "LethalLevelLoader Settings"), None
+    )
+    inject_dynamic_weights = True
+    if settings_section is not None:
+        inject_dynamic_weights = (
+            settings_section.current("Inject Dynamic Matching Weights", "true").strip().lower() == "true"
+        )
+    if ASSUME_DYNAMIC_INJECTION_DISABLED:
+        inject_dynamic_weights = False
+
+    # Same-cfg-derived, non-adjustable weight every dungeon contributes on
+    # top of its manual weight (matches dungeon_odds_tool.py's formula).
+    dynamic_tag_weights: dict[str, dict[str, float]] = {
+        s.name: parse_weight_pairs(s.effective(DYNAMIC_LEVEL_TAGS_KEY)) if inject_dynamic_weights else {}
+        for s in sections
+        if s.category in ("Custom Dungeon", "Vanilla Dungeon")
+    }
+    def dynamic_component(dungeon: str, tags: set[str]) -> float:
+        return sum(dynamic_tag_weights.get(dungeon, {}).get(tag, 0.0) for tag in tags)
 
     data: dict[str, list[dict[str, object]]] = json.loads(WEIGHTS_JSON_PATH.read_text(encoding="utf-8"))
 
@@ -159,8 +257,10 @@ def main() -> None:
     for level_name in all_levels:
         if level_name in vanilla_level_names:
             default_percent = DEFAULT_VANILLA_LEVEL_MODDED_CHANCE_PERCENT
+            tags = level_tags("Vanilla Level")
         elif level_name in modded_level_names:
             default_percent = DEFAULT_MODDED_LEVEL_MODDED_CHANCE_PERCENT
+            tags = level_tags("Custom Level")
         else:
             continue  # Not an installed level; nothing to balance.
 
@@ -170,33 +270,48 @@ def main() -> None:
             percent = 99
         p = max(percent, 0) / 100
 
-        vanilla_total = sum(
-            as_weight(entry_index[dungeon][level_name]["weight"])
+        # Effective (manual + dynamic tag) weight is what actually decides
+        # odds in-game, so the target percentage is solved against that,
+        # not the raw manual weight alone.
+        vanilla_effective_total = sum(
+            as_weight(entry_index[dungeon][level_name]["weight"]) + dynamic_component(dungeon, tags)
             for dungeon in vanilla_dungeons_present
             if level_name in entry_index[dungeon]
         )
-        ratio_base = vanilla_total if vanilla_total > 0 else FALLBACK_VANILLA_WEIGHT_WHEN_ZERO
-        target_modded_total = ratio_base * p / (1 - p) if p > 0 else 0.0
+        ratio_base = vanilla_effective_total if vanilla_effective_total > 0 else FALLBACK_VANILLA_WEIGHT_WHEN_ZERO
+        target_effective_modded_total = ratio_base * p / (1 - p) if p > 0 else 0.0
 
         modded_weights = {
             dungeon: as_weight(entry_index[dungeon][level_name]["weight"])
             for dungeon in modded_dungeons_present
             if level_name in entry_index[dungeon]
         }
+        modded_dynamic_total = sum(dynamic_component(dungeon, tags) for dungeon in modded_weights)
+
+        # Only the manual portion is ours to adjust; the dynamic portion is
+        # a fixed baseline already added on top at odds-computation time.
+        target_manual_modded_total = target_effective_modded_total - modded_dynamic_total
+        if target_manual_modded_total < 0:
+            print(
+                f"Warning: '{level_name}' target {percent}% modded is already exceeded by dynamic tag "
+                f"weight injection alone ({modded_dynamic_total:.2f} baseline); clamping manual weights to 0."
+            )
+            target_manual_modded_total = 0.0
+
         current_modded_total = sum(modded_weights.values())
 
         if current_modded_total > 0:
-            scale = target_modded_total / current_modded_total
+            scale = target_manual_modded_total / current_modded_total
             new_weights = {name: weight * scale for name, weight in modded_weights.items()}
         else:
-            per_dungeon = target_modded_total / len(modded_weights) if modded_weights else 0.0
+            per_dungeon = target_manual_modded_total / len(modded_weights) if modded_weights else 0.0
             new_weights = {name: per_dungeon for name in modded_weights}
 
         for dungeon, weight in new_weights.items():
             entry_index[dungeon][level_name]["weight"] = weight
         adjusted += 1
-        print(f"'{level_name}': {percent}% modded chance -> modded total weight {target_modded_total:.2f} "
-              f"across {len(new_weights)} modded interior(s).")
+        print(f"'{level_name}': {percent}% modded chance -> manual modded total weight {target_manual_modded_total:.2f} "
+              f"(+ {modded_dynamic_total:.2f} dynamic baseline) across {len(new_weights)} modded interior(s).")
 
     interior_weights = {
         interior_name: [(str(entry["level"]), as_weight(entry["weight"])) for entry in entries]

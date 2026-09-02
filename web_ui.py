@@ -239,6 +239,11 @@ def set_field(lines: list[str], start: int, end: int, key: str, new_value: str) 
     return False
 
 
+def as_weight(value: object) -> float:
+    assert isinstance(value, (int, float)), f"Expected a number, got {value!r}"
+    return float(value)
+
+
 def format_weight(weight: float) -> str:
     return str(int(weight)) if weight.is_integer() else f"{weight:g}"
 
@@ -319,12 +324,27 @@ def build_download_cfg(reset_to_default: bool, clean_references: bool, weights: 
         if category in ("Custom Dungeon", "Vanilla Dungeon")
     }
 
+    # The edited weights are balanced assuming they're the only thing that
+    # decides odds; leaving dynamic tag-based weight injection on would add
+    # each dungeon's own fixed weight on top and throw that off.
+    settings_section = next(
+        (
+            (start, end) for category, name, start, end in sections
+            if category.strip(" -") == "LethalLevelLoader Settings"
+        ),
+        None,
+    )
+    if settings_section is not None:
+        start, end = settings_section
+        if (get_field(lines, start, end, "Inject Dynamic Matching Weights") or "").strip().lower() != "false":
+            set_field(lines, start, end, "Inject Dynamic Matching Weights", "false")
+
     for interior_name, entries in weights.items():
         match = dungeon_by_name.get(interior_name.strip().lower())
         if match is None:
             continue
         start, end = match
-        updates = {str(entry["level"]).strip(): float(entry["weight"]) for entry in entries}
+        updates = {str(entry["level"]).strip(): as_weight(entry["weight"]) for entry in entries}
         apply_weight_updates(lines, start, end, updates)
 
     return "".join(lines)

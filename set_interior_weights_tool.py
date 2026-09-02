@@ -44,6 +44,7 @@ PAIR_RE = re.compile(r"^(?P<name>.+):(?P<weight>-?\d+(?:\.\d+)?)$")
 
 MANUAL_LEVEL_NAMES_KEY = "Dungeon Injection Settings - Manual Level Names List"
 ENABLE_CONTENT_CONFIG_KEY = "Enable Content Configuration"
+INJECT_DYNAMIC_WEIGHTS_KEY = "Inject Dynamic Matching Weights"
 
 
 def parse_header(header_line: str) -> tuple[str, str]:
@@ -141,6 +142,22 @@ def main() -> None:
         for category, name, start, end in sections
         if category in ("Custom Dungeon", "Vanilla Dungeon")
     }
+
+    # The manual weights above are balanced assuming they're the only thing
+    # that decides odds; leaving dynamic tag-based weight injection on would
+    # add each dungeon's own fixed weight on top and throw that off.
+    settings_section = next(
+        (
+            (start, end) for category, name, start, end in sections
+            if category.strip(" -") == "LethalLevelLoader Settings"
+        ),
+        None,
+    )
+    if settings_section is not None:
+        start, end = settings_section
+        if (get_field(lines, start, end, INJECT_DYNAMIC_WEIGHTS_KEY) or "").strip().lower() != "false":
+            set_field(lines, start, end, INJECT_DYNAMIC_WEIGHTS_KEY, "false")
+            print(f"Note: disabled '{INJECT_DYNAMIC_WEIGHTS_KEY}' so manual weights alone decide odds.")
 
     updated_interiors = 0
     not_found = []

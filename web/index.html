@@ -25,6 +25,14 @@
     </label>
   </section>
 
+  <section id="blacklistPanel">
+    <button id="toggleBlacklistBtn">Blacklist Interiors &#9662;</button>
+    <div id="blacklistBody" hidden>
+      <p class="subtitle">One entry per line (or comma-separated) - an interior's exact name, or one of its dynamic tags (e.g. "Vanilla", "Custom", "Modded"). Any matching interior always shows 0% odds and downloads with weight 0.</p>
+      <textarea id="blacklistInput" rows="4" placeholder="e.g. Mineshaft (Level3Flow)&#10;Modded"></textarea>
+    </div>
+  </section>
+
   <section id="balancePanel">
     <button id="toggleBalanceBtn">Balance Interior Weights &#9662;</button>
     <div id="balanceBody" hidden>
@@ -42,42 +50,28 @@
     </div>
   </section>
 
-  <section id="pagination">
-    <button id="prevBtn">&laquo; Prev</button>
-    <select id="interiorSelect"></select>
-    <button id="nextBtn">Next &raquo;</button>
-    <span id="pageLabel"></span>
+  <section id="byLevelPanel">
+    <button id="toggleByLevelBtn">Interior Weights by Level &#9662;</button>
+    <div id="byLevelBody">
+      <section id="levelPagination">
+        <button id="prevLevelBtn">&laquo; Prev</button>
+        <select id="levelSelect"></select>
+        <button id="nextLevelBtn">Next &raquo;</button>
+        <span id="levelPageLabel"></span>
+      </section>
+
+      <table id="levelWeightsTable">
+        <thead>
+          <tr>
+            <th>Interior</th>
+            <th>Weight</th>
+            <th>Odds for this level</th>
+          </tr>
+        </thead>
+        <tbody id="levelWeightsBody"></tbody>
+      </table>
+    </div>
   </section>
-
-  <table id="weightsTable">
-    <thead>
-      <tr>
-        <th>Level</th>
-        <th>Weight</th>
-        <th>Odds in this interior</th>
-      </tr>
-    </thead>
-    <tbody id="weightsBody"></tbody>
-  </table>
-
-  <h2>Interior Weights by Level</h2>
-  <section id="levelPagination">
-    <button id="prevLevelBtn">&laquo; Prev</button>
-    <select id="levelSelect"></select>
-    <button id="nextLevelBtn">Next &raquo;</button>
-    <span id="levelPageLabel"></span>
-  </section>
-
-  <table id="levelWeightsTable">
-    <thead>
-      <tr>
-        <th>Interior</th>
-        <th>Weight</th>
-        <th>Odds for this level</th>
-      </tr>
-    </thead>
-    <tbody id="levelWeightsBody"></tbody>
-  </table>
 
   <script src="/app.js"></script>
 </body>

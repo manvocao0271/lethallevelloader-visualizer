@@ -40,6 +40,12 @@ LEADING_NUMBER_RE = re.compile(r"^\d+\s+")
 SETTING_LINE_RE = re.compile(r"^(?P<key>.+?) = (?P<value>.*)$")
 DEFAULT_COMMENT_RE = re.compile(r"^# Default value:\s?(?P<default>.*)$")
 PAIR_RE = re.compile(r"^(?P<name>.+):(?P<weight>-?\d+(?:\.\d+)?)$")
+# Only matches plain integers (no decimal point), mirroring C#'s
+# int.TryParse - LethalLevelLoader silently treats a decimal value like
+# "74.63" as if that specific entry were never listed (weight 0).
+PAIR_RE_INT = re.compile(r"^(?P<name>.+):(?P<weight>-?\d+)$")
+MIN_WEIGHT = 0
+MAX_WEIGHT = 9999
 MANUAL_LEVEL_NAMES_KEY = "Dungeon Injection Settings - Manual Level Names List"
 DYNAMIC_LEVEL_TAGS_KEY = "Dungeon Injection Settings - Dynamic Level Tags List"
 ENABLE_CONTENT_CONFIG_KEY = "Enable Content Configuration"
@@ -137,6 +143,24 @@ def parse_weight_pairs(raw: str) -> dict[str, float]:
         match = PAIR_RE.match(chunk.strip())
         if match:
             weights[match.group("name").strip()] = float(match.group("weight"))
+    return weights
+
+
+def clamp_weight(value: int) -> int:
+    return max(MIN_WEIGHT, min(MAX_WEIGHT, value))
+
+
+def parse_int_weight_pairs(raw: str) -> dict[str, int]:
+    """Parse a "Name:Weight,Name2:Weight2" list the same way
+    LethalLevelLoader's ConfigHelper.ConvertToStringWithRarityList does
+    (int.TryParse per entry, clamped to [0, 9999]) - used for dynamic tag
+    weights, which are read-only ground truth the real game will use
+    exactly as parsed here."""
+    weights: dict[str, int] = {}
+    for chunk in raw.split(","):
+        match = PAIR_RE_INT.match(chunk.strip())
+        if match:
+            weights[match.group("name").strip()] = clamp_weight(int(match.group("weight")))
     return weights
 
 
@@ -245,7 +269,12 @@ def as_weight(value: object) -> float:
 
 
 def format_weight(weight: float) -> str:
-    return str(int(weight)) if weight.is_integer() else f"{weight:g}"
+    """LethalLevelLoader parses each weight with C#'s int.TryParse and
+    clamps it to [0, 9999] (ConfigHelper.ConvertToStringWithRarityList) - a
+    decimal value would silently fail to parse and become 0 in-game, so
+    always write a plain, rounded, clamped integer here regardless of what
+    the client computed."""
+    return str(clamp_weight(round(weight)))
 
 
 def apply_weight_updates(lines: list[str], start: int, end: int, updates: dict[str, float]) -> None:
@@ -286,7 +315,7 @@ def build_data_payload() -> dict[str, object]:
 
     dungeons_payload = []
     for dungeon in dungeon_sections:
-        tag_weights = parse_weight_pairs(dungeon.effective(DYNAMIC_LEVEL_TAGS_KEY))
+        tag_weights = parse_int_weight_pairs(dungeon.effective(DYNAMIC_LEVEL_TAGS_KEY))
         dungeons_payload.append({
             "name": dungeon.name,
             "category": dungeon.category,

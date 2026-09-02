@@ -27,6 +27,22 @@ What is (and isn't) accounted for:
       Configuration" is true; otherwise its listed "# Default value" is used
       instead, matching how LethalLevelLoader actually reads the cfg.
 
+How the real weight math works (confirmed from LethalLevelLoader's source,
+IAmBatby/LethalLevelLoader on GitHub):
+    - A dungeon's effective weight for a level is the MAXIMUM of its manual
+      "Planet Name" match and its dynamic "Content Tags" match - never a
+      sum (MatchingProperties.UpdateRarity only replaces the running value
+      when a higher one is found). If a level has multiple matching tags,
+      the dynamic side is also a MAX across those tags, not a sum.
+    - Every weight is parsed as a plain integer via C#'s int.TryParse
+      (ConfigHelper.ConvertToStringWithRarityList); a value with a decimal
+      point (e.g. "74.63") fails to parse and that specific entry silently
+      becomes 0, while other entries in the same list are unaffected.
+    - Every successfully parsed weight is clamped to [0, 9999].
+    - A dungeon with an effective weight of 0 for a level is excluded
+      entirely (DungeonManager.GetValidExtendedDungeonFlows filters out any
+      rarity == 0 entry), matching the omission behavior below.
+
 This is a best-effort approximation, not a byte-for-byte reproduction of
 LethalLevelLoader's internal weighting algorithm.
 """
@@ -45,7 +61,11 @@ SECTION_HEADER_RE = re.compile(r"^\[(?P<inner>.*)\]\s*$")
 LEADING_NUMBER_RE = re.compile(r"^\d+\s+")
 SETTING_LINE_RE = re.compile(r"^(?P<key>.+?) = (?P<value>.*)$")
 DEFAULT_COMMENT_RE = re.compile(r"^# Default value:\s?(?P<default>.*)$")
-PAIR_RE = re.compile(r"^(?P<name>.+):(?P<weight>-?\d+(?:\.\d+)?)$")
+# Only matches plain integers (no decimal point), mirroring C#'s
+# int.TryParse - a decimal value like "74.63" simply won't match here.
+PAIR_RE_INT = re.compile(r"^(?P<name>.+):(?P<weight>-?\d+)$")
+MIN_WEIGHT = 0
+MAX_WEIGHT = 9999
 
 
 class Section:
@@ -114,14 +134,23 @@ def parse_sections(path: Path) -> list[Section]:
     return sections
 
 
-def parse_weight_pairs(raw: str) -> dict[str, float]:
-    """Parse a "Name:Weight,Name2:Weight2" list into a dict. Unparseable
-    entries (e.g. "Default Values Were Empty") are silently skipped."""
-    weights: dict[str, float] = {}
+def clamp_weight(value: int) -> int:
+    return max(MIN_WEIGHT, min(MAX_WEIGHT, value))
+
+
+def parse_int_weight_pairs(raw: str) -> dict[str, int]:
+    """Parse a "Name:Weight,Name2:Weight2" list the same way
+    LethalLevelLoader's ConfigHelper.ConvertToStringWithRarityList does:
+    each pair is parsed with int.TryParse, so a non-integer value (e.g. a
+    decimal like "74.63") silently fails and that specific entry is treated
+    as if it were never listed (i.e. weight 0), while other pairs in the
+    same list are unaffected. Every successfully parsed value is clamped to
+    the game's [0, 9999] range."""
+    weights: dict[str, int] = {}
     for chunk in raw.split(","):
-        match = PAIR_RE.match(chunk.strip())
+        match = PAIR_RE_INT.match(chunk.strip())
         if match:
-            weights[match.group("name").strip()] = float(match.group("weight"))
+            weights[match.group("name").strip()] = clamp_weight(int(match.group("weight")))
     return weights
 
 
@@ -131,26 +160,40 @@ def level_tags(category: str) -> set[str]:
     return {"Custom", "Modded"}
 
 
+def highest_rarity_for_tags(tag_weights: dict[str, int], tags: set[str]) -> int:
+    """LethalLevelLoader takes the single highest matching rarity across all
+    of a level's tags, not a sum - GetHighestRarityViaMatchingNormalizedStrings
+    keeps replacing the running value only when a higher one is found."""
+    return max((tag_weights.get(tag, 0) for tag in tags), default=0)
+
+
 def compute_odds(level: Section, dungeons: list[Section], inject_dynamic_weights: bool) -> dict[str, float]:
     """Return {dungeon_name: percentage} for a single level, based on each
-    dungeon's weight for that level. Dungeons with zero weight are omitted."""
+    dungeon's EFFECTIVE weight for that level. Effective weight = MAX of the
+    manual "Planet Name" match and the dynamic "Content Tags" match (never a
+    sum), confirmed from LevelMatchingProperties.GetDynamicRarity /
+    MatchingProperties.UpdateRarity. Dungeons with zero effective weight are
+    omitted, matching DungeonManager.GetValidExtendedDungeonFlows filtering
+    out any rarity == 0 entry."""
     tags = level_tags(level.category)
     weights: dict[str, float] = {}
 
     for dungeon in dungeons:
-        manual_levels = parse_weight_pairs(
+        manual_levels = parse_int_weight_pairs(
             dungeon.effective("Dungeon Injection Settings - Manual Level Names List")
         )
-        weight = manual_levels.get(level.name, 0.0)
+        manual_weight = manual_levels.get(level.name, 0)
 
+        dynamic_weight = 0
         if inject_dynamic_weights:
-            tag_weights = parse_weight_pairs(
+            tag_weights = parse_int_weight_pairs(
                 dungeon.effective("Dungeon Injection Settings - Dynamic Level Tags List")
             )
-            weight += sum(tag_weights.get(tag, 0.0) for tag in tags)
+            dynamic_weight = highest_rarity_for_tags(tag_weights, tags)
 
-        if weight > 0:
-            weights[dungeon.name] = weight
+        effective_weight = max(manual_weight, dynamic_weight)
+        if effective_weight > 0:
+            weights[dungeon.name] = float(effective_weight)
 
     total = sum(weights.values())
     if total <= 0:

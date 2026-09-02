@@ -28,12 +28,7 @@ header h1 {
   color: #9d9d9d;
 }
 
-h2 {
-  font-size: 1.1rem;
-  margin: 1.5rem 0 0.75rem 0;
-}
-
-#toolbar, #pagination, #cfgOptions, #balancePanel, #levelPagination {
+#toolbar, #cfgOptions, #balancePanel, #levelPagination, #byLevelPanel, #blacklistPanel {
   display: flex;
   align-items: center;
   gap: 1rem;
@@ -45,19 +40,36 @@ h2 {
   flex-wrap: wrap;
 }
 
-#balancePanel {
+#balancePanel, #byLevelPanel, #blacklistPanel {
   flex-direction: column;
   align-items: stretch;
 }
 
-#balanceBody {
+#balanceBody, #byLevelBody, #blacklistBody {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
 }
 
-#balanceBody[hidden] {
+#balanceBody[hidden], #byLevelBody[hidden], #blacklistBody[hidden] {
   display: none;
+}
+
+#blacklistInput {
+  width: 100%;
+  max-width: 32rem;
+  background: #1a1a1a;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.5rem;
+  font-family: inherit;
+  resize: vertical;
+}
+
+#blacklistInput:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
 #balanceTable {
@@ -107,7 +119,7 @@ button:hover, select:hover {
   font-style: italic;
 }
 
-#pageLabel {
+#levelPageLabel {
   color: #9d9d9d;
 }
 
@@ -153,4 +165,9 @@ input[type="number"]:focus {
 .odds-cell {
   color: var(--accent);
   font-variant-numeric: tabular-nums;
+}
+
+tr.blacklisted td {
+  color: #7a7a7a;
+  text-decoration: line-through;
 }

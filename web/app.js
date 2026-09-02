@@ -10,7 +10,6 @@ const DEFAULT_LEVEL_MODDED_CHANCE_PERCENT = {
 };
 const DEFAULT_VANILLA_LEVEL_MODDED_CHANCE_PERCENT = 0;
 const DEFAULT_MODDED_LEVEL_MODDED_CHANCE_PERCENT = 50;
-const FALLBACK_VANILLA_WEIGHT_WHEN_ZERO = 100;
 
 const state = {
   levels: [],            // [{ name, category }]
@@ -20,14 +19,33 @@ const state = {
   weightsByDungeonLevel: {}, // { dungeonName: { levelName: weight } }
   defaultWeightsByDungeonLevel: {},
   interiorNames: [],
-  currentIndex: 0,
   currentLevelIndex: 0,
   resetToDefaultRequested: false,
   cleanReferencesRequested: false,
+  blacklist: [], // lowercased interior names and/or dynamic tags
 };
 
 function levelTags(category) {
   return category.startsWith("Vanilla") ? ["Vanilla"] : ["Custom", "Modded"];
+}
+
+function parseBlacklistInput(raw) {
+  return raw
+    .split(/[,\n]/)
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => entry.length > 0);
+}
+
+// An interior is blacklisted if the list contains its exact name, or any
+// one of the tags it's configured with in its Dynamic Level Tags List.
+function isBlacklisted(dungeonName) {
+  if (state.blacklist.length === 0) return false;
+  const dungeon = state.dungeons.find((d) => d.name === dungeonName);
+  const nameLower = dungeonName.toLowerCase();
+  return state.blacklist.some((entry) => {
+    if (entry === nameLower) return true;
+    return dungeon ? Object.keys(dungeon.dynamicTagWeights).some((tag) => tag.toLowerCase() === entry) : false;
+  });
 }
 
 function setStatus(message) {
@@ -63,47 +81,53 @@ async function loadData() {
   state.defaultWeightsByDungeonLevel = indexWeights(data.defaultWeights || {});
 
   document.getElementById("injectDynamicToggle").checked = state.injectDynamicWeights;
-  populateInteriorSelect();
   populateBalanceTable();
   populateLevelSelect();
-  renderPage();
   renderLevelPage();
   setStatus("");
 }
 
-function populateInteriorSelect() {
-  const select = document.getElementById("interiorSelect");
-  select.innerHTML = "";
-  state.interiorNames.forEach((name, index) => {
-    const option = document.createElement("option");
-    option.value = index;
-    option.textContent = name;
-    select.appendChild(option);
-  });
-}
-
 function dynamicTagWeightFor(dungeonName, tag) {
   const dungeon = state.dungeons.find((d) => d.name === dungeonName);
-  return dungeon ? (dungeon.dynamicTagWeights[tag] || 0) : 0;
+  const raw = dungeon ? (dungeon.dynamicTagWeights[tag] || 0) : 0;
+  return clampWeight(raw);
 }
 
+// LethalLevelLoader takes the single HIGHEST matching rarity across all of
+// a level's tags, not a sum (GetHighestRarityViaMatchingNormalizedStrings
+// only ever replaces its running value with a higher one), and the overall
+// effective weight (see computeOddsForLevel) is likewise a MAX of the
+// manual and dynamic components, never their sum.
 function dynamicComponentFor(dungeonName, tags) {
-  return state.injectDynamicWeights
-    ? tags.reduce((sum, tag) => sum + dynamicTagWeightFor(dungeonName, tag), 0)
-    : 0;
+  if (!state.injectDynamicWeights) return 0;
+  return tags.reduce((max, tag) => Math.max(max, dynamicTagWeightFor(dungeonName, tag)), 0);
+}
+
+// LethalLevelLoader parses every weight with C#'s int.TryParse and clamps
+// it to [0, 9999] (ConfigHelper.ConvertToStringWithRarityList) - a decimal
+// value silently fails to parse and becomes 0 in-game. Rounding/clamping
+// here keeps the live preview honest about what will actually happen once
+// a value is written out and read back in by the real game.
+function clampWeight(value) {
+  return Math.max(0, Math.min(9999, Math.round(value)));
 }
 
 // Recompute {dungeonName: percentage} for a single level, across ALL interiors -
-// same formula as dungeon_odds_tool.py's compute_odds().
+// same formula as dungeon_odds_tool.py's compute_odds(): effective weight is
+// the MAX of a dungeon's manual weight and its dynamic tag weight for this
+// level, never their sum (confirmed from LevelMatchingProperties.
+// GetDynamicRarity / MatchingProperties.UpdateRarity).
 function computeOddsForLevel(levelName, category) {
   const tags = levelTags(category);
   const weights = {};
 
   for (const dungeonName of state.interiorNames) {
-    const manual = (state.weightsByDungeonLevel[dungeonName] || {})[levelName] || 0;
+    if (isBlacklisted(dungeonName)) continue;
+    const manualRaw = (state.weightsByDungeonLevel[dungeonName] || {})[levelName] || 0;
+    const manual = clampWeight(manualRaw);
     const dynamic = dynamicComponentFor(dungeonName, tags);
-    const total = manual + dynamic;
-    if (total > 0) weights[dungeonName] = total;
+    const effective = Math.max(manual, dynamic);
+    if (effective > 0) weights[dungeonName] = effective;
   }
 
   const grandTotal = Object.values(weights).reduce((a, b) => a + b, 0);
@@ -155,20 +179,6 @@ function populateLevelSelect() {
   });
 }
 
-// Keeps the by-interior table and the by-level table showing the same value
-// for a given (interior, level) pair without a full re-render.
-function syncWeightInput(interiorName, levelName, value) {
-  if (state.interiorNames[state.currentIndex] === interiorName) {
-    const mainInput = document.querySelector(`#weightsBody tr[data-level="${levelName}"] input`);
-    if (mainInput && mainInput.value !== value) mainInput.value = value;
-  }
-  const currentLevel = state.levels[state.currentLevelIndex];
-  if (currentLevel && currentLevel.name === levelName) {
-    const levelInput = document.querySelector(`#levelWeightsBody tr[data-interior="${interiorName}"] input`);
-    if (levelInput && levelInput.value !== value) levelInput.value = value;
-  }
-}
-
 function renderLevelPage() {
   const total = state.levels.length;
   if (total === 0) return;
@@ -184,6 +194,7 @@ function renderLevelPage() {
   for (const interiorName of state.interiorNames) {
     const row = document.createElement("tr");
     row.dataset.interior = interiorName;
+    row.classList.toggle("blacklisted", isBlacklisted(interiorName));
 
     const nameCell = document.createElement("td");
     nameCell.textContent = interiorName;
@@ -198,8 +209,6 @@ function renderLevelPage() {
       const value = parseFloat(input.value);
       if (!state.weightsByDungeonLevel[interiorName]) state.weightsByDungeonLevel[interiorName] = {};
       state.weightsByDungeonLevel[interiorName][level.name] = Number.isFinite(value) ? value : 0;
-      syncWeightInput(interiorName, level.name, input.value);
-      updateOddsColumn();
       updateLevelOddsColumn();
     });
     weightCell.appendChild(input);
@@ -216,13 +225,25 @@ function renderLevelPage() {
   updateLevelOddsColumn();
 }
 
+// Grows past 2 decimals when needed so a tiny-but-nonzero odds value (e.g. a
+// dungeon with no dynamic tag weight competing against ones that have a large
+// one) doesn't get rounded down to a misleading "0.00%".
+function formatPercentage(value) {
+  if (value <= 0) return "0.00%";
+  for (let decimals = 2; decimals <= 6; decimals++) {
+    const fixed = value.toFixed(decimals);
+    if (parseFloat(fixed) > 0) return `${fixed}%`;
+  }
+  return `${value.toFixed(6)}%`;
+}
+
 function updateLevelOddsColumn() {
   const level = state.levels[state.currentLevelIndex];
   if (!level) return;
   const odds = computeOddsForLevel(level.name, level.category);
   for (const cell of document.querySelectorAll("#levelWeightsBody .level-odds-cell")) {
     const percentage = odds[cell.dataset.interior] || 0;
-    cell.textContent = `${percentage.toFixed(2)}%`;
+    cell.textContent = formatPercentage(percentage);
   }
 }
 
@@ -233,9 +254,15 @@ function goToLevelPage(delta) {
 
 // Same math as balance_interior_weights.py's main(), ported to run live in
 // the browser against the currently edited weights + toggle state.
+// Vanilla level to copy vanilla-dungeon weights from when a level has none
+// configured at all (e.g. March has no entry in any of the 3 vanilla dungeon
+// sections' Manual Level Names List, so its real vanilla weight is 0 and the
+// "target modded %" can never be reflected in the actual odds otherwise).
+const VANILLA_WEIGHT_TEMPLATE_LEVEL = "Adamance";
+
 function applyBalance() {
-  const vanillaDungeons = state.dungeons.filter((d) => d.category === "Vanilla Dungeon").map((d) => d.name);
-  const moddedDungeons = state.dungeons.filter((d) => d.category === "Custom Dungeon").map((d) => d.name);
+  const vanillaDungeons = state.dungeons.filter((d) => d.category === "Vanilla Dungeon" && !isBlacklisted(d.name)).map((d) => d.name);
+  const moddedDungeons = state.dungeons.filter((d) => d.category === "Custom Dungeon" && !isBlacklisted(d.name)).map((d) => d.name);
 
   const percentInputs = document.querySelectorAll("#balanceTableBody input[type='number']");
   const percentByLevel = {};
@@ -244,47 +271,92 @@ function applyBalance() {
     percentByLevel[input.dataset.level] = Number.isFinite(value) ? value : 0;
   }
 
+  let clampedAnyWeight = false;
+
   for (const level of state.levels) {
     const tags = levelTags(level.category);
     let percent = percentByLevel[level.name] ?? 0;
     if (percent >= 100) percent = 99;
     const p = Math.max(percent, 0) / 100;
 
-    const vanillaEffectiveTotal = vanillaDungeons.reduce((sum, d) => {
-      const manual = (state.weightsByDungeonLevel[d] || {})[level.name] || 0;
-      return sum + manual + dynamicComponentFor(d, tags);
-    }, 0);
-    const ratioBase = vanillaEffectiveTotal > 0 ? vanillaEffectiveTotal : FALLBACK_VANILLA_WEIGHT_WHEN_ZERO;
-    const targetEffectiveModdedTotal = p > 0 ? (ratioBase * p) / (1 - p) : 0;
-
-    const moddedWeights = {};
-    for (const d of moddedDungeons) {
-      moddedWeights[d] = (state.weightsByDungeonLevel[d] || {})[level.name] || 0;
+    // Vanilla dungeons with literally no configured weight for this level
+    // (e.g. no Manual Level Names List entry at all) start from a copied
+    // template so there's something to scale.
+    const manualVanillaTotal = vanillaDungeons.reduce((sum, d) => sum + ((state.weightsByDungeonLevel[d] || {})[level.name] || 0), 0);
+    if (manualVanillaTotal <= 0 && level.name !== VANILLA_WEIGHT_TEMPLATE_LEVEL) {
+      for (const d of vanillaDungeons) {
+        const templateWeight = (state.weightsByDungeonLevel[d] || {})[VANILLA_WEIGHT_TEMPLATE_LEVEL] || 0;
+        if (!state.weightsByDungeonLevel[d]) state.weightsByDungeonLevel[d] = {};
+        state.weightsByDungeonLevel[d][level.name] = clampWeight(templateWeight);
+      }
     }
-    const moddedDynamicTotal = moddedDungeons.reduce((sum, d) => sum + dynamicComponentFor(d, tags), 0);
 
-    let targetManualModdedTotal = targetEffectiveModdedTotal - moddedDynamicTotal;
-    if (targetManualModdedTotal < 0) targetManualModdedTotal = 0;
+    if (p <= 0) {
+      // LethalLevelLoader always takes MAX(manual, dynamic), so a modded
+      // dungeon with its own dynamic tag weight can never be pushed to a
+      // true 0% this way - but zeroing the manual weight is the closest
+      // this tool can get, and matches dungeons that have no dynamic
+      // weight at all.
+      for (const d of moddedDungeons) {
+        if (!state.weightsByDungeonLevel[d]) state.weightsByDungeonLevel[d] = {};
+        state.weightsByDungeonLevel[d][level.name] = 0;
+      }
+      continue;
+    }
 
-    const currentModdedTotal = Object.values(moddedWeights).reduce((a, b) => a + b, 0);
-    const newWeights = {};
-    if (currentModdedTotal > 0) {
-      const scale = targetManualModdedTotal / currentModdedTotal;
-      for (const d of moddedDungeons) newWeights[d] = moddedWeights[d] * scale;
-    } else {
-      const perDungeon = moddedDungeons.length ? targetManualModdedTotal / moddedDungeons.length : 0;
-      for (const d of moddedDungeons) newWeights[d] = perDungeon;
+    // LethalLevelLoader takes the MAX of a dungeon's manual weight and its
+    // dynamic tag weight for this level - never a sum - so the only way to
+    // give every modded dungeon the exact same effective weight is to set
+    // each one's manual weight to a value at least as high as the largest
+    // dynamic tag weight among them. That guarantees the manual weight
+    // "wins" the MAX for every modded dungeon, making them all truly equal.
+    const moddedDynamicWeights = moddedDungeons.map((d) => dynamicComponentFor(d, tags));
+    const moddedFloor = moddedDynamicWeights.length ? Math.max(...moddedDynamicWeights, 1) : 1;
+    const perDungeonWeight = clampWeight(moddedFloor);
+    if (perDungeonWeight !== moddedFloor) clampedAnyWeight = true;
+    const actualModdedEffectiveTotal = perDungeonWeight * moddedDungeons.length;
+
+    // Vanilla dungeons keep their existing relative ratio (or the copied
+    // template ratio above), scaled so their total hits whatever's needed
+    // to make the modded share equal the requested percentage. Vanilla
+    // dungeons in this cfg never carry a dynamic tag weight of their own,
+    // so their effective weight is just their (now scaled) manual weight.
+    const vanillaManualBeforeScale = vanillaDungeons.reduce((sum, d) => sum + ((state.weightsByDungeonLevel[d] || {})[level.name] || 0), 0);
+    const requiredVanillaTotal = (actualModdedEffectiveTotal * (1 - p)) / p;
+    const scale = vanillaManualBeforeScale > 0 ? requiredVanillaTotal / vanillaManualBeforeScale : 0;
+    for (const d of vanillaDungeons) {
+      if (!state.weightsByDungeonLevel[d]) state.weightsByDungeonLevel[d] = {};
+      const current = state.weightsByDungeonLevel[d][level.name] || 0;
+      const updated = vanillaManualBeforeScale > 0
+        ? current * scale
+        : (vanillaDungeons.length ? requiredVanillaTotal / vanillaDungeons.length : 0);
+      const clamped = clampWeight(updated);
+      if (clamped !== Math.round(updated)) clampedAnyWeight = true;
+      state.weightsByDungeonLevel[d][level.name] = clamped;
     }
 
     for (const d of moddedDungeons) {
       if (!state.weightsByDungeonLevel[d]) state.weightsByDungeonLevel[d] = {};
-      state.weightsByDungeonLevel[d][level.name] = Math.round(newWeights[d] * 100) / 100;
+      state.weightsByDungeonLevel[d][level.name] = perDungeonWeight;
     }
   }
 
-  renderPage();
+  // Blacklisted interiors are always forced to 0, overriding anything else
+  // applied above.
+  for (const interiorName of state.interiorNames) {
+    if (!isBlacklisted(interiorName)) continue;
+    if (!state.weightsByDungeonLevel[interiorName]) state.weightsByDungeonLevel[interiorName] = {};
+    for (const level of state.levels) {
+      state.weightsByDungeonLevel[interiorName][level.name] = 0;
+    }
+  }
+
   renderLevelPage();
-  setStatus("Balanced modded weights applied.");
+  setStatus(
+    clampedAnyWeight
+      ? "Balanced modded weights applied (some weights hit the game's 9999 cap, so their exact target % may not be reachable)."
+      : "Balanced modded weights applied."
+  );
 }
 
 function applyResetToDefault() {
@@ -294,7 +366,6 @@ function applyResetToDefault() {
     state.weightsByDungeonLevel[interiorName] = { ...(state.defaultWeightsByDungeonLevel[interiorName] || {}) };
   }
   state.resetToDefaultRequested = true;
-  renderPage();
   renderLevelPage();
   setStatus("Reset weights and dynamic weight toggle to defaults (all other settings will also reset on download).");
 }
@@ -304,74 +375,14 @@ function applyCleanReferences() {
   setStatus("Uninstalled level references will be removed on download.");
 }
 
-function renderPage() {
-  const total = state.interiorNames.length;
-  if (total === 0) return;
-  state.currentIndex = ((state.currentIndex % total) + total) % total;
-  const interiorName = state.interiorNames[state.currentIndex];
-
-  document.getElementById("interiorSelect").value = state.currentIndex;
-  document.getElementById("pageLabel").textContent = `${state.currentIndex + 1} of ${total}`;
-
-  const tbody = document.getElementById("weightsBody");
-  tbody.innerHTML = "";
-
-  for (const level of state.levels) {
-    const row = document.createElement("tr");
-    row.dataset.level = level.name;
-
-    const nameCell = document.createElement("td");
-    nameCell.textContent = level.name;
-    row.appendChild(nameCell);
-
-    const weightCell = document.createElement("td");
-    const input = document.createElement("input");
-    input.type = "number";
-    input.step = "any";
-    input.value = (state.weightsByDungeonLevel[interiorName] || {})[level.name] ?? 0;
-    input.addEventListener("input", () => {
-      const value = parseFloat(input.value);
-      state.weightsByDungeonLevel[interiorName][level.name] = Number.isFinite(value) ? value : 0;
-      syncWeightInput(interiorName, level.name, input.value);
-      updateOddsColumn();
-      updateLevelOddsColumn();
-    });
-    weightCell.appendChild(input);
-    row.appendChild(weightCell);
-
-    const oddsCell = document.createElement("td");
-    oddsCell.className = "odds-cell";
-    oddsCell.dataset.level = level.name;
-    oddsCell.dataset.category = level.category;
-    row.appendChild(oddsCell);
-
-    tbody.appendChild(row);
-  }
-
-  updateOddsColumn();
-}
-
-function updateOddsColumn() {
-  const interiorName = state.interiorNames[state.currentIndex];
-  for (const cell of document.querySelectorAll("#weightsBody .odds-cell")) {
-    const odds = computeOddsForLevel(cell.dataset.level, cell.dataset.category);
-    const percentage = odds[interiorName] || 0;
-    cell.textContent = `${percentage.toFixed(2)}%`;
-  }
-}
-
-function goToPage(delta) {
-  state.currentIndex += delta;
-  renderPage();
-}
-
 async function downloadCfg() {
   setStatus("Generating .cfg...");
   const weights = {};
   for (const interiorName of state.interiorNames) {
+    const blacklisted = isBlacklisted(interiorName);
     weights[interiorName] = state.levels.map((level) => ({
       level: level.name,
-      weight: (state.weightsByDungeonLevel[interiorName] || {})[level.name] ?? 0,
+      weight: blacklisted ? 0 : ((state.weightsByDungeonLevel[interiorName] || {})[level.name] ?? 0),
     }));
   }
 
@@ -404,18 +415,11 @@ async function downloadCfg() {
   setStatus("Downloaded LethalLevelLoader.custom.cfg");
 }
 
-document.getElementById("prevBtn").addEventListener("click", () => goToPage(-1));
-document.getElementById("nextBtn").addEventListener("click", () => goToPage(1));
-document.getElementById("interiorSelect").addEventListener("change", (e) => {
-  state.currentIndex = parseInt(e.target.value, 10);
-  renderPage();
-});
 document.getElementById("downloadBtn").addEventListener("click", downloadCfg);
 document.getElementById("resetBtn").addEventListener("click", applyResetToDefault);
 document.getElementById("cleanBtn").addEventListener("click", applyCleanReferences);
 document.getElementById("injectDynamicToggle").addEventListener("change", (e) => {
   state.injectDynamicWeights = e.target.checked;
-  updateOddsColumn();
   updateLevelOddsColumn();
 });
 document.getElementById("toggleBalanceBtn").addEventListener("click", () => {
@@ -428,6 +432,19 @@ document.getElementById("prevLevelBtn").addEventListener("click", () => goToLeve
 document.getElementById("nextLevelBtn").addEventListener("click", () => goToLevelPage(1));
 document.getElementById("levelSelect").addEventListener("change", (e) => {
   state.currentLevelIndex = parseInt(e.target.value, 10);
+  renderLevelPage();
+});
+document.getElementById("toggleByLevelBtn").addEventListener("click", () => {
+  const body = document.getElementById("byLevelBody");
+  body.hidden = !body.hidden;
+});
+
+document.getElementById("toggleBlacklistBtn").addEventListener("click", () => {
+  const body = document.getElementById("blacklistBody");
+  body.hidden = !body.hidden;
+});
+document.getElementById("blacklistInput").addEventListener("input", (e) => {
+  state.blacklist = parseBlacklistInput(e.target.value);
   renderLevelPage();
 });
 

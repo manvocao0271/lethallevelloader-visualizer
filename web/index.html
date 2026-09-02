@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Interior Weights Editor</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <h1>Interior Weights Editor</h1>
+    <p class="subtitle">Edit each interior's level weights and see dungeon odds recalculate live.</p>
+  </header>
+
+  <section id="toolbar">
+    <label class="checkbox">
+      <input type="checkbox" id="resetToDefault">
+      Reset all settings to default
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" id="cleanReferences">
+      Remove references to uninstalled levels
+    </label>
+    <button id="downloadBtn">Download .cfg</button>
+    <span id="status"></span>
+  </section>
+
+  <section id="pagination">
+    <button id="prevBtn">&laquo; Prev</button>
+    <select id="interiorSelect"></select>
+    <button id="nextBtn">Next &raquo;</button>
+    <span id="pageLabel"></span>
+  </section>
+
+  <table id="weightsTable">
+    <thead>
+      <tr>
+        <th>Level</th>
+        <th>Weight</th>
+        <th>Odds in this interior</th>
+      </tr>
+    </thead>
+    <tbody id="weightsBody"></tbody>
+  </table>
+
+  <script src="/app.js"></script>
+</body>
+</html>

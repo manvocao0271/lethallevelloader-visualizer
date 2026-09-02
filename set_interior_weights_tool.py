@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from typing import cast
 
 SOURCE_CFG_PATH = Path(__file__).resolve().parent / "copied_lethallevelloader.cfg"
 OUTPUT_CFG_PATH = SOURCE_CFG_PATH.with_name("LethalLevelLoader.weights_applied.cfg")
@@ -111,7 +112,7 @@ def format_weight(weight: float) -> str:
 
 
 def format_weight_list(pairs: list[list[object]]) -> str:
-    return ",".join(f"{name}:{format_weight(weight)}" for name, weight in pairs)
+    return ",".join(f"{name}:{format_weight(cast(float, weight))}" for name, weight in pairs)
 
 
 def merge_weight_updates(raw: str, updates: dict[str, float]) -> str:

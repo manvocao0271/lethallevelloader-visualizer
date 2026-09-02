@@ -23,7 +23,7 @@ from pathlib import Path
 # CONFIG - list the moons/levels to remove, then run the script
 # ============================================================
 
-LEVELS_TO_REMOVE = "Oldred, Gratar, Auralis"
+LEVELS_TO_REMOVE = ""
 
 # ============================================================
 

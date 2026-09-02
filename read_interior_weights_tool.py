@@ -9,10 +9,15 @@ How to use:
     Run this script: python read_interior_weights_tool.py
     Each run overwrites interior_weights.json with the cfg's current contents.
 
-A dungeon's list is only included if it isn't empty. A dungeon's settings are
-only read if its own "Enable Content Configuration" is true; otherwise its
-listed "# Default value" is used instead, matching how LethalLevelLoader
-actually reads the cfg.
+Every "Custom Dungeon"/"Vanilla Dungeon" section is included, one per interior,
+listing every installed level (weight 0 if the cfg didn't mention it). A
+dungeon's settings are only read if its own "Enable Content Configuration" is
+true; otherwise its listed "# Default value" is used instead, matching how
+LethalLevelLoader actually reads the cfg.
+
+Each interior's levels are always written in a fixed order: the vanilla
+levels first (see VANILLA_LEVEL_ORDER), followed by modded/custom levels
+sorted by ascending route price.
 """
 
 from __future__ import annotations
@@ -32,6 +37,14 @@ DEFAULT_COMMENT_RE = re.compile(r"^# Default value:\s?(?P<default>.*)$")
 PAIR_RE = re.compile(r"^(?P<name>.+):(?P<weight>-?\d+(?:\.\d+)?)$")
 
 MANUAL_LEVEL_NAMES_KEY = "Dungeon Injection Settings - Manual Level Names List"
+PLANET_ROUTE_PRICE_KEY = "General Settings - Planet Route Price"
+
+# Fixed display order for vanilla levels; modded/custom levels are appended
+# after these, sorted by ascending route price.
+VANILLA_LEVEL_ORDER = [
+    "Gordion", "Experimentation", "Assurance", "Vow", "March", "Adamance",
+    "Offense", "Rend", "Dine", "Titan", "Embrion", "Artifice", "Liquidation",
+]
 
 
 class Section:
@@ -97,14 +110,15 @@ def parse_sections(path: Path) -> list[Section]:
     return sections
 
 
-def parse_weight_pairs(raw: str) -> list[tuple[str, float]]:
+def parse_weight_pairs(raw: str, installed_levels: set[str]) -> list[tuple[str, float]]:
     """Parse a "Name:Weight,Name2:Weight2" list into an ordered list of
     (name, weight) pairs. Unparseable entries (e.g. "Default Values Were
-    Empty") are silently skipped."""
+    Empty") and names not present as a level section in this cfg are
+    silently skipped."""
     pairs = []
     for chunk in raw.split(","):
         match = PAIR_RE.match(chunk.strip())
-        if match:
+        if match and match.group("name").strip() in installed_levels:
             pairs.append((match.group("name").strip(), float(match.group("weight"))))
     return pairs
 
@@ -138,11 +152,26 @@ def main() -> None:
     sections = parse_sections(SOURCE_CFG_PATH)
     dungeons = [s for s in sections if s.category in ("Custom Dungeon", "Vanilla Dungeon")]
 
+    vanilla_names = {s.name for s in sections if s.category == "Vanilla Level"}
+    sorted_vanilla_names = [name for name in VANILLA_LEVEL_ORDER if name in vanilla_names]
+
+    custom_sections = [s for s in sections if s.category == "Custom Level"]
+    custom_sections.sort(key=lambda s: float(s.effective(PLANET_ROUTE_PRICE_KEY) or 0))
+    sorted_custom_names = [s.name for s in custom_sections]
+
+    installed_level_names = sorted_vanilla_names + sorted_custom_names
+    installed_levels = set(installed_level_names)
+
     interior_weights: dict[str, list[tuple[str, float]]] = {}
     for dungeon in dungeons:
-        pairs = parse_weight_pairs(dungeon.effective(MANUAL_LEVEL_NAMES_KEY))
-        if pairs:
-            interior_weights[dungeon.name] = pairs
+        pairs = parse_weight_pairs(dungeon.effective(MANUAL_LEVEL_NAMES_KEY), installed_levels)
+        # Reorder to the fixed vanilla order + ascending-price custom order,
+        # filling in any installed level the dungeon's list didn't mention (or
+        # dungeons with no manual list at all) at weight 0, so every dungeon
+        # section is represented.
+        weight_by_name = dict(pairs)
+        pairs = [(name, weight_by_name.get(name, 0.0)) for name in installed_level_names]
+        interior_weights[dungeon.name] = pairs
 
     OUTPUT_JSON_PATH.write_text(dump_condensed_json(interior_weights), encoding="utf-8")
     total_entries = sum(len(pairs) for pairs in interior_weights.values())

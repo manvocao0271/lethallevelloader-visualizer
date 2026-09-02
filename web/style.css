@@ -1,0 +1,121 @@
+:root {
+  color-scheme: dark;
+  --bg: #1e1e1e;
+  --panel: #252526;
+  --border: #3c3c3c;
+  --text: #d4d4d4;
+  --accent: #4fc1ff;
+  --accent-dim: #2d5f78;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 1.5rem;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", Arial, sans-serif;
+}
+
+header h1 {
+  margin: 0 0 0.25rem 0;
+  font-size: 1.5rem;
+}
+
+.subtitle {
+  margin: 0 0 1rem 0;
+  color: #9d9d9d;
+}
+
+#toolbar, #pagination {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+
+button, select {
+  background: #333333;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.4rem 0.8rem;
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+
+button:hover, select:hover {
+  border-color: var(--accent);
+}
+
+#downloadBtn {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+#status {
+  color: #9d9d9d;
+  font-style: italic;
+}
+
+#pageLabel {
+  color: #9d9d9d;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+th, td {
+  padding: 0.5rem 0.9rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+th {
+  background: #2d2d2d;
+  position: sticky;
+  top: 0;
+}
+
+tr:last-child td {
+  border-bottom: none;
+}
+
+input[type="number"] {
+  width: 6rem;
+  background: #1a1a1a;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.3rem 0.5rem;
+}
+
+input[type="number"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.odds-cell {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}

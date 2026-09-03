@@ -3,13 +3,13 @@
 // Same defaults as balance_interior_weights.py's CONFIG section - only used
 // to prefill the percent inputs; each can be edited before clicking Apply.
 const DEFAULT_LEVEL_MODDED_CHANCE_PERCENT = {
-  Experimentation: 5, Assurance: 5, Vow: 5,
-  March: 10, Adamance: 10, Offense: 10,
-  Embrion: 15, Rend: 15, Dine: 15, Titan: 15,
-  Artifice: 20,
+  Experimentation: 5, Assurance: 5, Vow: 10,
+  March: 10, Adamance: 15, Offense: 15,
+  Embrion: 30, Rend: 20, Dine: 20, Titan: 25,
+  Artifice: 30,
 };
 const DEFAULT_VANILLA_LEVEL_MODDED_CHANCE_PERCENT = 0;
-const DEFAULT_MODDED_LEVEL_MODDED_CHANCE_PERCENT = 50;
+const DEFAULT_MODDED_LEVEL_MODDED_CHANCE_PERCENT = 70;
 
 const state = {
   levels: [],            // [{ name, category }]
@@ -23,7 +23,26 @@ const state = {
   resetToDefaultRequested: false,
   cleanReferencesRequested: false,
   blacklist: [], // lowercased interior names and/or dynamic tags
+  levelSettingsByLevel: {}, // { levelName: { settingKey: value } }
+  defaultLevelSettingsByLevel: {},
 };
+
+// Must exactly match web_ui.py's LEVEL_SETTING_KEYS strings.
+const LEVEL_SETTING_FIELDS = [
+  { group: "General", key: "General Settings - Planet Route Price", label: "Planet Route Price", type: "int" },
+  { group: "General", key: "General Settings - Day Speed Multiplier", label: "Day Speed Multiplier", type: "float" },
+  { group: "General", key: "General Settings - Does Planet Have Time", label: "Does Planet Have Time", type: "bool" },
+  { group: "Scrap", key: "Scrap Settings - Minimum Scrap Item Spawns", label: "Minimum Scrap Item Spawns", type: "int" },
+  { group: "Scrap", key: "Scrap Settings - Maximum Scrap Item Spawns", label: "Maximum Scrap Item Spawns", type: "int" },
+  { group: "Scrap", key: "Scrap Settings - Minimum Total Scrap Value", label: "Minimum Total Scrap Value", type: "int" },
+  { group: "Scrap", key: "Scrap Settings - Maximum Total Scrap Value", label: "Maximum Total Scrap Value", type: "int" },
+  { group: "Enemy", key: "Enemy Settings - Maximum Inside Enemy Power Count", label: "Maximum Inside Enemy Power Count", type: "int" },
+  { group: "Enemy", key: "Enemy Settings - Maximum Outside, Daytime Enemy Power Count", label: "Maximum Outside, Daytime Enemy Power Count", type: "int" },
+  { group: "Enemy", key: "Enemy Settings - Maximum Outside, Nighttime Enemy Power Count", label: "Maximum Outside, Nighttime Enemy Power Count", type: "int" },
+  { group: "Enemy", key: "Enemy Settings - Inside Enemies Spawning List", label: "Inside Enemies Spawning List", type: "string" },
+  { group: "Enemy", key: "Enemy Settings - Outside Daytime Enemies Spawning List", label: "Outside Daytime Enemies Spawning List", type: "string" },
+  { group: "Enemy", key: "Enemy Settings - Outside Nighttime Enemies Spawning List", label: "Outside Nighttime Enemies Spawning List", type: "string" },
+];
 
 function levelTags(category) {
   return category.startsWith("Vanilla") ? ["Vanilla"] : ["Custom", "Modded"];
@@ -79,6 +98,14 @@ async function loadData() {
   state.interiorNames = Object.keys(data.weights);
   state.weightsByDungeonLevel = indexWeights(data.weights);
   state.defaultWeightsByDungeonLevel = indexWeights(data.defaultWeights || {});
+  state.levelSettingsByLevel = {};
+  for (const [levelName, settings] of Object.entries(data.levelSettings || {})) {
+    state.levelSettingsByLevel[levelName] = { ...settings };
+  }
+  state.defaultLevelSettingsByLevel = {};
+  for (const [levelName, settings] of Object.entries(data.levelSettingsDefaults || {})) {
+    state.defaultLevelSettingsByLevel[levelName] = { ...settings };
+  }
 
   document.getElementById("injectDynamicToggle").checked = state.injectDynamicWeights;
   populateBalanceTable();
@@ -223,6 +250,70 @@ function renderLevelPage() {
   }
 
   updateLevelOddsColumn();
+  renderLevelSettingsPanel();
+}
+
+function setLevelSetting(levelName, key, value) {
+  if (!state.levelSettingsByLevel[levelName]) state.levelSettingsByLevel[levelName] = {};
+  state.levelSettingsByLevel[levelName][key] = value;
+}
+
+function renderLevelSettingsPanel() {
+  const level = state.levels[state.currentLevelIndex];
+  const container = document.getElementById("levelSettingsFields");
+  if (!level || !container) return;
+  container.innerHTML = "";
+  const settings = state.levelSettingsByLevel[level.name] || {};
+
+  let currentGroup = null;
+  let groupDiv = null;
+  for (const field of LEVEL_SETTING_FIELDS) {
+    if (field.group !== currentGroup) {
+      currentGroup = field.group;
+      groupDiv = document.createElement("div");
+      groupDiv.className = "level-settings-group";
+      const heading = document.createElement("h4");
+      heading.textContent = currentGroup;
+      groupDiv.appendChild(heading);
+      container.appendChild(groupDiv);
+    }
+
+    const row = document.createElement("div");
+    row.className = "level-settings-row";
+
+    const label = document.createElement("label");
+    label.textContent = field.label;
+    row.appendChild(label);
+
+    const rawValue = settings[field.key] ?? "";
+    let input;
+    if (field.type === "bool") {
+      input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = String(rawValue).toLowerCase() === "true";
+      input.addEventListener("change", () => {
+        setLevelSetting(level.name, field.key, input.checked ? "true" : "false");
+      });
+    } else if (field.type === "string") {
+      input = document.createElement("textarea");
+      input.rows = 2;
+      input.value = rawValue;
+      input.addEventListener("input", () => {
+        setLevelSetting(level.name, field.key, input.value);
+      });
+    } else {
+      input = document.createElement("input");
+      input.type = "number";
+      if (field.type === "float") input.step = "any";
+      input.value = rawValue;
+      input.addEventListener("input", () => {
+        setLevelSetting(level.name, field.key, input.value);
+      });
+    }
+
+    row.appendChild(input);
+    groupDiv.appendChild(row);
+  }
 }
 
 // Grows past 2 decimals when needed so a tiny-but-nonzero odds value (e.g. a
@@ -365,6 +456,9 @@ function applyResetToDefault() {
   for (const interiorName of state.interiorNames) {
     state.weightsByDungeonLevel[interiorName] = { ...(state.defaultWeightsByDungeonLevel[interiorName] || {}) };
   }
+  for (const level of state.levels) {
+    state.levelSettingsByLevel[level.name] = { ...(state.defaultLevelSettingsByLevel[level.name] || {}) };
+  }
   state.resetToDefaultRequested = true;
   renderLevelPage();
   setStatus("Reset weights and dynamic weight toggle to defaults (all other settings will also reset on download).");
@@ -394,6 +488,7 @@ async function downloadCfg() {
       cleanReferences: state.cleanReferencesRequested,
       injectDynamicWeights: state.injectDynamicWeights,
       weights,
+      levelSettings: state.levelSettingsByLevel,
     }),
   });
 
@@ -446,6 +541,11 @@ document.getElementById("toggleBlacklistBtn").addEventListener("click", () => {
 document.getElementById("blacklistInput").addEventListener("input", (e) => {
   state.blacklist = parseBlacklistInput(e.target.value);
   renderLevelPage();
+});
+
+document.getElementById("toggleLevelSettingsBtn").addEventListener("click", () => {
+  const body = document.getElementById("levelSettingsBody");
+  body.hidden = !body.hidden;
 });
 
 loadData();

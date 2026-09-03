@@ -52,15 +52,15 @@ DYNAMIC_LEVEL_TAGS_KEY = "Dungeon Injection Settings - Dynamic Level Tags List"
 LEVEL_MODDED_CHANCE_PERCENT: dict[str, float] = {
     "Experimentation": 5,
     "Assurance": 5,
-    "Vow": 5,
+    "Vow": 10,
     "March": 10,
-    "Adamance": 10,
-    "Offense": 10,
-    "Embrion": 15,
-    "Rend": 15,
-    "Dine": 15,
-    "Titan": 15,
-    "Artifice": 20,
+    "Adamance": 15,
+    "Offense": 15,
+    "Embrion": 30,
+    "Rend": 20,
+    "Dine": 20,
+    "Titan": 25,
+    "Artifice": 30,
 }
 
 # Vanilla levels not listed above (e.g. Gordion, Liquidation) get this
@@ -68,7 +68,7 @@ LEVEL_MODDED_CHANCE_PERCENT: dict[str, float] = {
 DEFAULT_VANILLA_LEVEL_MODDED_CHANCE_PERCENT = 0
 
 # Modded/custom levels not listed above get this percent instead.
-DEFAULT_MODDED_LEVEL_MODDED_CHANCE_PERCENT = 50
+DEFAULT_MODDED_LEVEL_MODDED_CHANCE_PERCENT = 70
 
 # Nominal vanilla-dungeon weight total to use when a level's actual weight
 # is 0 across all vanilla dungeons (so its target percent is still

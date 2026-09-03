@@ -28,7 +28,7 @@ header h1 {
   color: #9d9d9d;
 }
 
-#toolbar, #cfgOptions, #balancePanel, #levelPagination, #byLevelPanel, #blacklistPanel {
+#toolbar, #cfgOptions, #balancePanel, #levelPagination, #byLevelPanel, #blacklistPanel, #levelSettingsPanel {
   display: flex;
   align-items: center;
   gap: 1rem;
@@ -40,18 +40,18 @@ header h1 {
   flex-wrap: wrap;
 }
 
-#balancePanel, #byLevelPanel, #blacklistPanel {
+#balancePanel, #byLevelPanel, #blacklistPanel, #levelSettingsPanel {
   flex-direction: column;
   align-items: stretch;
 }
 
-#balanceBody, #byLevelBody, #blacklistBody {
+#balanceBody, #byLevelBody, #blacklistBody, #levelSettingsBody {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
 }
 
-#balanceBody[hidden], #byLevelBody[hidden], #blacklistBody[hidden] {
+#balanceBody[hidden], #byLevelBody[hidden], #blacklistBody[hidden], #levelSettingsBody[hidden] {
   display: none;
 }
 
@@ -170,4 +170,61 @@ input[type="number"]:focus {
 tr.blacklisted td {
   color: #7a7a7a;
   text-decoration: line-through;
+}
+
+#levelSettingsFields {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.level-settings-group h4 {
+  margin: 0 0 0.5rem 0;
+  color: var(--accent);
+  font-size: 0.95rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.level-settings-group {
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.level-settings-group:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.level-settings-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.level-settings-row label {
+  flex: 0 0 20rem;
+}
+
+.level-settings-row input[type="number"],
+.level-settings-row input[type="text"] {
+  width: 8rem;
+}
+
+.level-settings-row textarea {
+  flex: 1;
+  min-width: 16rem;
+  background: #1a1a1a;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.4rem 0.6rem;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.level-settings-row textarea:focus {
+  outline: none;
+  border-color: var(--accent);
 }

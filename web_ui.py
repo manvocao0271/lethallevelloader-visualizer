@@ -50,6 +50,24 @@ MANUAL_LEVEL_NAMES_KEY = "Dungeon Injection Settings - Manual Level Names List"
 DYNAMIC_LEVEL_TAGS_KEY = "Dungeon Injection Settings - Dynamic Level Tags List"
 ENABLE_CONTENT_CONFIG_KEY = "Enable Content Configuration"
 
+# Per-moon settings shown/edited in the web UI's "Moon Settings" panel, in
+# the same order they appear in each Custom Level/Vanilla Level section.
+LEVEL_SETTING_KEYS = [
+    "General Settings - Planet Route Price",
+    "General Settings - Day Speed Multiplier",
+    "General Settings - Does Planet Have Time",
+    "Scrap Settings - Minimum Scrap Item Spawns",
+    "Scrap Settings - Maximum Scrap Item Spawns",
+    "Scrap Settings - Minimum Total Scrap Value",
+    "Scrap Settings - Maximum Total Scrap Value",
+    "Enemy Settings - Maximum Inside Enemy Power Count",
+    "Enemy Settings - Maximum Outside, Daytime Enemy Power Count",
+    "Enemy Settings - Maximum Outside, Nighttime Enemy Power Count",
+    "Enemy Settings - Inside Enemies Spawning List",
+    "Enemy Settings - Outside Daytime Enemies Spawning List",
+    "Enemy Settings - Outside Nighttime Enemies Spawning List",
+]
+
 STATIC_CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
     ".js": "text/javascript; charset=utf-8",
@@ -287,6 +305,17 @@ def apply_weight_updates(lines: list[str], start: int, end: int, updates: dict[s
         set_field(lines, start, end, ENABLE_CONTENT_CONFIG_KEY, "true")
 
 
+def apply_level_setting_updates(lines: list[str], start: int, end: int, updates: dict[str, str]) -> None:
+    for key, value in updates.items():
+        if key not in LEVEL_SETTING_KEYS:
+            continue
+        set_field(lines, start, end, key, str(value))
+
+    enabled = (get_field(lines, start, end, ENABLE_CONTENT_CONFIG_KEY) or "").strip().lower()
+    if enabled != "true":
+        set_field(lines, start, end, ENABLE_CONTENT_CONFIG_KEY, "true")
+
+
 # ---------------------------------------------------------------------------
 # API handlers
 # ---------------------------------------------------------------------------
@@ -343,6 +372,18 @@ def build_data_payload() -> dict[str, object]:
             {"level": name, "weight": default_pairs.get(name, 0.0)} for name in level_order
         ]
 
+    level_by_name = {s.name: s for s in level_sections}
+    level_settings_payload: dict[str, dict[str, str]] = {
+        name: {key: level_by_name[name].effective(key) for key in LEVEL_SETTING_KEYS}
+        for name in level_order
+        if name in level_by_name
+    }
+    level_settings_defaults_payload: dict[str, dict[str, str]] = {
+        name: {key: level_by_name[name].fields.get(key, ("", ""))[1] for key in LEVEL_SETTING_KEYS}
+        for name in level_order
+        if name in level_by_name
+    }
+
     return {
         "levels": levels_payload,
         "dungeons": dungeons_payload,
@@ -350,6 +391,8 @@ def build_data_payload() -> dict[str, object]:
         "injectDynamicWeightsDefault": inject_dynamic_weights_default,
         "weights": weights,
         "defaultWeights": default_weights_payload,
+        "levelSettings": level_settings_payload,
+        "levelSettingsDefaults": level_settings_defaults_payload,
     }
 
 
@@ -358,6 +401,7 @@ def build_download_cfg(
     clean_references: bool,
     inject_dynamic_weights: bool,
     weights: dict[str, list[dict[str, object]]],
+    level_settings: dict[str, dict[str, str]],
 ) -> str:
     lines = SOURCE_CFG_PATH.read_text(encoding="utf-8").splitlines(keepends=True)
 
@@ -373,6 +417,11 @@ def build_download_cfg(
         name.lower(): (start, end)
         for category, name, start, end in sections
         if category in ("Custom Dungeon", "Vanilla Dungeon")
+    }
+    level_by_name = {
+        name: (start, end)
+        for category, name, start, end in sections
+        if category in ("Custom Level", "Vanilla Level")
     }
 
     # Match whatever the live UI toggle showed when the weights were edited.
@@ -394,6 +443,13 @@ def build_download_cfg(
         start, end = match
         updates = {str(entry["level"]).strip(): as_weight(entry["weight"]) for entry in entries}
         apply_weight_updates(lines, start, end, updates)
+
+    for level_name, updates in level_settings.items():
+        match = level_by_name.get(level_name.strip())
+        if match is None:
+            continue
+        start, end = match
+        apply_level_setting_updates(lines, start, end, updates)
 
     return "".join(lines)
 
@@ -449,6 +505,7 @@ class Handler(BaseHTTPRequestHandler):
                 bool(body.get("cleanReferences")),
                 bool(body.get("injectDynamicWeights", True)),
                 body.get("weights") or {},
+                body.get("levelSettings") or {},
             )
         except Exception as exc:  # noqa: BLE001 - surface any error to the browser
             self._send_json({"error": str(exc)}, status=400)

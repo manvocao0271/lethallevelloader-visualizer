@@ -28,7 +28,7 @@ header h1 {
   color: #9d9d9d;
 }
 
-#toolbar, #cfgOptions, #balancePanel, #levelPagination, #byLevelPanel, #blacklistPanel, #levelSettingsPanel {
+#toolbar, #balancePanel, #levelPagination, #byLevelPanel, #blacklistPanel, #levelSettingsPanel {
   display: flex;
   align-items: center;
   gap: 1rem;
@@ -167,7 +167,7 @@ input[type="number"]:focus {
   font-variant-numeric: tabular-nums;
 }
 
-tr.blacklisted td {
+tr.blacklisted td, tr.zero-odds td {
   color: #7a7a7a;
   text-decoration: line-through;
 }

@@ -5,10 +5,17 @@ A small local web app that combines reset_tool.py, clean_cfg.py,
 read_interior_weights_tool.py and set_interior_weights_tool.py into one
 interactive page: edit interior_weights.json's weights in the browser, see
 each level's dungeon odds recalculate live (same formula as
-dungeon_odds_tool.py, including "Inject Dynamic Matching Weights"), then
-download a new .cfg with your edits applied - optionally also resetting
-every setting to its default and/or removing references to uninstalled
-levels first.
+dungeon_odds_tool.py), then download a new .cfg with your edits applied -
+optionally also resetting every setting to its default and/or removing
+references to uninstalled levels first.
+
+Note: dynamic tag weight injection ("Dungeon Injection Settings - Dynamic
+Level Tags List") is always applied when computing odds, regardless of the
+cfg's "Inject Dynamic Matching Weights" setting. That setting does not
+actually gate dynamic tag matching in LethalLevelLoader's dungeon-selection
+code (confirmed via source inspection) - it is effectively a dead/vestigial
+setting, so this tool ignores it rather than mislead you into thinking it
+disables anything.
 
 How to use:
     Run this script: python web_ui.py
@@ -324,20 +331,6 @@ def build_data_payload() -> dict[str, object]:
     lines = SOURCE_CFG_PATH.read_text(encoding="utf-8").splitlines()
     sections = parse_sections_from_lines(lines)
 
-    settings_section = next(
-        (s for s in sections if s.category.strip(" -") == "LethalLevelLoader Settings"), None
-    )
-    inject_dynamic_weights = True
-    inject_dynamic_weights_default = True
-    if settings_section is not None:
-        inject_dynamic_weights = (
-            settings_section.current("Inject Dynamic Matching Weights", "true").strip().lower() == "true"
-        )
-        inject_dynamic_weights_default = (
-            settings_section.fields.get("Inject Dynamic Matching Weights", ("true", "true"))[1].strip().lower()
-            == "true"
-        )
-
     level_sections = [s for s in sections if s.category in ("Custom Level", "Vanilla Level")]
     dungeon_sections = [s for s in sections if s.category in ("Custom Dungeon", "Vanilla Dungeon")]
     level_category_by_name = {s.name: s.category for s in level_sections}
@@ -387,8 +380,6 @@ def build_data_payload() -> dict[str, object]:
     return {
         "levels": levels_payload,
         "dungeons": dungeons_payload,
-        "injectDynamicWeights": inject_dynamic_weights,
-        "injectDynamicWeightsDefault": inject_dynamic_weights_default,
         "weights": weights,
         "defaultWeights": default_weights_payload,
         "levelSettings": level_settings_payload,
@@ -399,7 +390,7 @@ def build_data_payload() -> dict[str, object]:
 def build_download_cfg(
     reset_to_default: bool,
     clean_references: bool,
-    inject_dynamic_weights: bool,
+    empty_dungeon_injections: bool,
     weights: dict[str, list[dict[str, object]]],
     level_settings: dict[str, dict[str, str]],
 ) -> str:
@@ -424,17 +415,9 @@ def build_download_cfg(
         if category in ("Custom Level", "Vanilla Level")
     }
 
-    # Match whatever the live UI toggle showed when the weights were edited.
-    settings_section = next(
-        (
-            (start, end) for category, name, start, end in sections
-            if category.strip(" -") == "LethalLevelLoader Settings"
-        ),
-        None,
-    )
-    if settings_section is not None:
-        start, end = settings_section
-        set_field(lines, start, end, "Inject Dynamic Matching Weights", "true" if inject_dynamic_weights else "false")
+    if empty_dungeon_injections:
+        for start, end in dungeon_by_name.values():
+            set_field(lines, start, end, DYNAMIC_LEVEL_TAGS_KEY, "Default Values Were Empty")
 
     for interior_name, entries in weights.items():
         match = dungeon_by_name.get(interior_name.strip().lower())
@@ -503,7 +486,7 @@ class Handler(BaseHTTPRequestHandler):
             cfg_text = build_download_cfg(
                 bool(body.get("resetToDefault")),
                 bool(body.get("cleanReferences")),
-                bool(body.get("injectDynamicWeights", True)),
+                bool(body.get("emptyDungeonInjections")),
                 body.get("weights") or {},
                 body.get("levelSettings") or {},
             )

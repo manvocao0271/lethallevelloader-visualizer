@@ -14,12 +14,17 @@ How to use:
 
 What is (and isn't) accounted for:
     - "Manual Level Names List" on each dungeon: always applied.
-    - "Dynamic Level Tags List" on each dungeon: applied only if the global
-      "Inject Dynamic Matching Weights" setting is true. Since a level's own
-      tags aren't stored in this cfg, every level is assumed to only carry
-      the automatic "Vanilla" tag (vanilla levels) or "Custom"/"Modded" tags
-      (custom levels) - any extra tags a mod author assigned aren't visible
-      here and are NOT accounted for.
+    - "Dynamic Level Tags List" on each dungeon: always applied. Since a
+      level's own tags aren't stored in this cfg, every level is assumed to
+      only carry the automatic "Vanilla" tag (vanilla levels) or
+      "Custom"/"Modded" tags (custom levels) - any extra tags a mod author
+      assigned aren't visible here and are NOT accounted for.
+    - The cfg's "Inject Dynamic Matching Weights" setting is NOT accounted
+      for/does not gate anything here, matching the real game: source
+      inspection of LethalLevelLoader (DungeonManager.
+      GetValidExtendedDungeonFlows) shows dynamic tag matching
+      (LevelMatchingProperties.GetDynamicRarity) is applied unconditionally
+      for every custom dungeon - that setting does not appear to gate it.
     - "Manual Mod Names List" and "Dynamic Route Price List" are NOT
       accounted for, since a level's owning mod name and true route price
       aren't stored in this cfg either.
@@ -167,7 +172,7 @@ def highest_rarity_for_tags(tag_weights: dict[str, int], tags: set[str]) -> int:
     return max((tag_weights.get(tag, 0) for tag in tags), default=0)
 
 
-def compute_odds(level: Section, dungeons: list[Section], inject_dynamic_weights: bool) -> dict[str, float]:
+def compute_odds(level: Section, dungeons: list[Section]) -> dict[str, float]:
     """Return {dungeon_name: percentage} for a single level, based on each
     dungeon's EFFECTIVE weight for that level. Effective weight = MAX of the
     manual "Planet Name" match and the dynamic "Content Tags" match (never a
@@ -184,12 +189,10 @@ def compute_odds(level: Section, dungeons: list[Section], inject_dynamic_weights
         )
         manual_weight = manual_levels.get(level.name, 0)
 
-        dynamic_weight = 0
-        if inject_dynamic_weights:
-            tag_weights = parse_int_weight_pairs(
-                dungeon.effective("Dungeon Injection Settings - Dynamic Level Tags List")
-            )
-            dynamic_weight = highest_rarity_for_tags(tag_weights, tags)
+        tag_weights = parse_int_weight_pairs(
+            dungeon.effective("Dungeon Injection Settings - Dynamic Level Tags List")
+        )
+        dynamic_weight = highest_rarity_for_tags(tag_weights, tags)
 
         effective_weight = max(manual_weight, dynamic_weight)
         if effective_weight > 0:
@@ -207,30 +210,17 @@ def main() -> None:
 
     sections = parse_sections(SOURCE_CFG_PATH)
 
-    settings_section = next(
-        (s for s in sections if s.category.strip(" -") == "LethalLevelLoader Settings"), None
-    )
-    inject_dynamic_weights = True
-    if settings_section is not None:
-        inject_dynamic_weights = (
-            settings_section.current("Inject Dynamic Matching Weights", "true").strip().lower()
-            == "true"
-        )
-
     dungeons = [s for s in sections if s.category in ("Custom Dungeon", "Vanilla Dungeon")]
     levels = [s for s in sections if s.category in ("Custom Level", "Vanilla Level")]
 
     print("Dungeon odds per level/moon (based on current copied_lethallevelloader.cfg contents)")
-    print(
-        f"Dynamic (tag-based) weight injection is "
-        f"{'ENABLED' if inject_dynamic_weights else 'DISABLED'} globally."
-    )
+    print("Dynamic (tag-based) weight injection is always applied (matches real LethalLevelLoader behavior).")
     print()
 
     per_level_odds: dict[str, dict[str, float]] = {}
 
     for level in levels:
-        odds = compute_odds(level, dungeons, inject_dynamic_weights)
+        odds = compute_odds(level, dungeons)
         per_level_odds[level.name] = odds
 
         print(f"{level.category}: {level.name}")

@@ -14,14 +14,13 @@ const DEFAULT_MODDED_LEVEL_MODDED_CHANCE_PERCENT = 70;
 const state = {
   levels: [],            // [{ name, category }]
   dungeons: [],           // [{ name, category, dynamicTagWeights }]
-  injectDynamicWeights: true,
-  injectDynamicWeightsDefault: true,
   weightsByDungeonLevel: {}, // { dungeonName: { levelName: weight } }
   defaultWeightsByDungeonLevel: {},
   interiorNames: [],
   currentLevelIndex: 0,
   resetToDefaultRequested: false,
   cleanReferencesRequested: false,
+  emptyDungeonInjectionsRequested: false,
   blacklist: [], // lowercased interior names and/or dynamic tags
   levelSettingsByLevel: {}, // { levelName: { settingKey: value } }
   defaultLevelSettingsByLevel: {},
@@ -93,8 +92,6 @@ async function loadData() {
 
   state.levels = data.levels;
   state.dungeons = data.dungeons;
-  state.injectDynamicWeights = data.injectDynamicWeights;
-  state.injectDynamicWeightsDefault = data.injectDynamicWeightsDefault;
   state.interiorNames = Object.keys(data.weights);
   state.weightsByDungeonLevel = indexWeights(data.weights);
   state.defaultWeightsByDungeonLevel = indexWeights(data.defaultWeights || {});
@@ -107,7 +104,6 @@ async function loadData() {
     state.defaultLevelSettingsByLevel[levelName] = { ...settings };
   }
 
-  document.getElementById("injectDynamicToggle").checked = state.injectDynamicWeights;
   populateBalanceTable();
   populateLevelSelect();
   renderLevelPage();
@@ -125,8 +121,14 @@ function dynamicTagWeightFor(dungeonName, tag) {
 // only ever replaces its running value with a higher one), and the overall
 // effective weight (see computeOddsForLevel) is likewise a MAX of the
 // manual and dynamic components, never their sum.
+//
+// This dynamic component is always applied - LethalLevelLoader's actual
+// dungeon-selection code (DungeonManager.GetValidExtendedDungeonFlows)
+// calls GetDynamicRarity() unconditionally for every custom dungeon. The
+// cfg's "Inject Dynamic Matching Weights" setting does not gate this in
+// the real game (confirmed via source inspection), so this tool ignores
+// it too rather than showing odds that don't match `>simulate`.
 function dynamicComponentFor(dungeonName, tags) {
-  if (!state.injectDynamicWeights) return 0;
   return tags.reduce((max, tag) => Math.max(max, dynamicTagWeightFor(dungeonName, tag)), 0);
 }
 
@@ -335,6 +337,9 @@ function updateLevelOddsColumn() {
   for (const cell of document.querySelectorAll("#levelWeightsBody .level-odds-cell")) {
     const percentage = odds[cell.dataset.interior] || 0;
     cell.textContent = formatPercentage(percentage);
+    // Cross out interiors with a true 0% chance for this level (whether
+    // blacklisted or just genuinely unreachable).
+    cell.closest("tr").classList.toggle("zero-odds", percentage <= 0);
   }
 }
 
@@ -451,8 +456,6 @@ function applyBalance() {
 }
 
 function applyResetToDefault() {
-  state.injectDynamicWeights = state.injectDynamicWeightsDefault;
-  document.getElementById("injectDynamicToggle").checked = state.injectDynamicWeights;
   for (const interiorName of state.interiorNames) {
     state.weightsByDungeonLevel[interiorName] = { ...(state.defaultWeightsByDungeonLevel[interiorName] || {}) };
   }
@@ -461,12 +464,25 @@ function applyResetToDefault() {
   }
   state.resetToDefaultRequested = true;
   renderLevelPage();
-  setStatus("Reset weights and dynamic weight toggle to defaults (all other settings will also reset on download).");
+  setStatus("Reset weights to defaults (all other settings will also reset on download).");
 }
 
 function applyCleanReferences() {
   state.cleanReferencesRequested = true;
   setStatus("Uninstalled level references will be removed on download.");
+}
+
+// Zeroes every dungeon's "Dynamic Level Tags List" weight so odds are
+// driven purely by each dungeon's manual per-level weight - useful for
+// spotting dungeons with a 0 manual weight that still show nonzero odds
+// only because of this dynamic tag component.
+function applyEmptyDungeonInjections() {
+  for (const dungeon of state.dungeons) {
+    dungeon.dynamicTagWeights = {};
+  }
+  state.emptyDungeonInjectionsRequested = true;
+  updateLevelOddsColumn();
+  setStatus("Cleared dynamic level tag weights (live and on download).");
 }
 
 async function downloadCfg() {
@@ -486,7 +502,7 @@ async function downloadCfg() {
     body: JSON.stringify({
       resetToDefault: state.resetToDefaultRequested,
       cleanReferences: state.cleanReferencesRequested,
-      injectDynamicWeights: state.injectDynamicWeights,
+      emptyDungeonInjections: state.emptyDungeonInjectionsRequested,
       weights,
       levelSettings: state.levelSettingsByLevel,
     }),
@@ -513,10 +529,7 @@ async function downloadCfg() {
 document.getElementById("downloadBtn").addEventListener("click", downloadCfg);
 document.getElementById("resetBtn").addEventListener("click", applyResetToDefault);
 document.getElementById("cleanBtn").addEventListener("click", applyCleanReferences);
-document.getElementById("injectDynamicToggle").addEventListener("change", (e) => {
-  state.injectDynamicWeights = e.target.checked;
-  updateLevelOddsColumn();
-});
+document.getElementById("emptyDungeonInjectionsBtn").addEventListener("click", applyEmptyDungeonInjections);
 document.getElementById("toggleBalanceBtn").addEventListener("click", () => {
   const body = document.getElementById("balanceBody");
   body.hidden = !body.hidden;

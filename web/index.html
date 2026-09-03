@@ -14,15 +14,9 @@
   <section id="toolbar">
     <button id="resetBtn">Reset to Default</button>
     <button id="cleanBtn">Clean Uninstalled References</button>
+    <button id="emptyDungeonInjectionsBtn">Empty Dungeon Injections</button>
     <button id="downloadBtn">Download .cfg</button>
     <span id="status"></span>
-  </section>
-
-  <section id="cfgOptions">
-    <label class="checkbox">
-      <input type="checkbox" id="injectDynamicToggle">
-      Inject Dynamic Matching Weights
-    </label>
   </section>
 
   <section id="blacklistPanel">
@@ -36,7 +30,7 @@
   <section id="balancePanel">
     <button id="toggleBalanceBtn">Balance Interior Weights &#9662;</button>
     <div id="balanceBody" hidden>
-      <p class="subtitle">Target "chance of landing in any modded interior" per level. Applies instantly using the current weights and toggle above.</p>
+      <p class="subtitle">Target "chance of landing in any modded interior" per level. Applies instantly using the current weights.</p>
       <table id="balanceTable">
         <thead>
           <tr>

@@ -28,7 +28,7 @@ header h1 {
   color: #9d9d9d;
 }
 
-#toolbar, #balancePanel, #levelPagination, #byLevelPanel, #blacklistPanel, #levelSettingsPanel {
+#toolbar, #levelPagination, #byLevelPanel, #blacklistPanel, #levelSettingsPanel {
   display: flex;
   align-items: center;
   gap: 1rem;
@@ -40,18 +40,18 @@ header h1 {
   flex-wrap: wrap;
 }
 
-#balancePanel, #byLevelPanel, #blacklistPanel, #levelSettingsPanel {
+#byLevelPanel, #blacklistPanel, #levelSettingsPanel {
   flex-direction: column;
   align-items: stretch;
 }
 
-#balanceBody, #byLevelBody, #blacklistBody, #levelSettingsBody {
+#byLevelBody, #blacklistBody, #levelSettingsBody {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
 }
 
-#balanceBody[hidden], #byLevelBody[hidden], #blacklistBody[hidden], #levelSettingsBody[hidden] {
+#byLevelBody[hidden], #blacklistBody[hidden], #levelSettingsBody[hidden] {
   display: none;
 }
 
@@ -72,16 +72,17 @@ header h1 {
   border-color: var(--accent);
 }
 
-#balanceTable {
-  max-width: 24rem;
+#quickBalanceBar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
 }
 
-#balanceTable input[type="number"] {
-  width: 5rem;
+#quickBalanceValue {
+  width: 6rem;
 }
 
-#applyBalanceBtn {
-  align-self: flex-start;
+#quickBalanceBtn {
   background: var(--accent-dim);
   border-color: var(--accent);
   font-weight: 600;
@@ -172,6 +173,16 @@ tr.blacklisted td, tr.zero-odds td {
   text-decoration: line-through;
 }
 
+tr.locked {
+  background: #2a241a;
+}
+
+.lock-btn {
+  padding: 0.2rem 0.4rem;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
 #levelSettingsFields {
   display: flex;
   flex-direction: column;
@@ -227,4 +238,145 @@ tr.blacklisted td, tr.zero-odds td {
 .level-settings-row textarea:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+#levelWeightsTable input[type="number"] {
+  width: 5.5rem;
+}
+
+#levelSettingsToolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+#levelSettingsToolbar .subtitle {
+  margin: 0;
+  flex: 1;
+}
+
+#resetLevelSettingsBtn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.enemy-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.4rem 0 0 20rem;
+  flex: 1;
+  min-width: 16rem;
+}
+
+.enemy-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.enemy-bar-label {
+  flex: 0 0 9rem;
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.enemy-bar-value {
+  flex: 0 0 2.5rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8rem;
+  color: #9d9d9d;
+}
+
+.enemy-bar-slider {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 1.1rem;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  outline: none;
+  cursor: pointer;
+}
+
+.enemy-bar-slider::-webkit-slider-runnable-track {
+  height: 1.1rem;
+  border-radius: 4px;
+  background: inherit;
+}
+
+.enemy-bar-slider::-moz-range-track {
+  height: 1.1rem;
+  border-radius: 4px;
+  background: inherit;
+}
+
+.enemy-bar-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 0.6rem;
+  height: 1.5rem;
+  margin-top: -0.2rem;
+  background: #ffffff;
+  border: 1px solid #000000;
+  border-radius: 2px;
+  cursor: grab;
+}
+
+.enemy-bar-slider::-moz-range-thumb {
+  width: 0.6rem;
+  height: 1.5rem;
+  background: #ffffff;
+  border: 1px solid #000000;
+  border-radius: 2px;
+  cursor: grab;
+}
+
+.enemy-bar-slider.enemy-bar-yellow { background: #3a3218; }
+.enemy-bar-slider.enemy-bar-green { background: #1c3620; }
+.enemy-bar-slider.enemy-bar-red { background: #3a1e1c; }
+.enemy-bar-slider.weight-bar-slider { background: #182a38; }
+
+#levelWeightsTable .enemy-bar-slider {
+  width: 8rem;
+}
+
+#levelWeightsBody tr.dragging {
+  opacity: 0.4;
+}
+
+#levelWeightsBody tr.drag-over {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+
+.drag-handle {
+  cursor: grab;
+  color: #6b6b6b;
+  margin-right: 0.35rem;
+  font-size: 0.75rem;
+  user-select: none;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+.ungroup-btn {
+  margin-left: 0.4rem;
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 0 0.2rem;
+  opacity: 0.7;
+}
+
+.ungroup-btn:hover {
+  opacity: 1;
 }

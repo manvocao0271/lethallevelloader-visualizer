@@ -1,16 +1,5 @@
 // Interior Weights Editor - client-side state, live odds calc, pagination, download.
 
-// Same defaults as balance_interior_weights.py's CONFIG section - only used
-// to prefill the percent inputs; each can be edited before clicking Apply.
-const DEFAULT_LEVEL_MODDED_CHANCE_PERCENT = {
-  Experimentation: 5, Assurance: 5, Vow: 10,
-  March: 10, Adamance: 15, Offense: 15,
-  Embrion: 30, Rend: 20, Dine: 20, Titan: 25,
-  Artifice: 30,
-};
-const DEFAULT_VANILLA_LEVEL_MODDED_CHANCE_PERCENT = 0;
-const DEFAULT_MODDED_LEVEL_MODDED_CHANCE_PERCENT = 70;
-
 const state = {
   levels: [],            // [{ name, category }]
   dungeons: [],           // [{ name, category, dynamicTagWeights }]
@@ -24,7 +13,17 @@ const state = {
   blacklist: [], // lowercased interior names and/or dynamic tags
   levelSettingsByLevel: {}, // { levelName: { settingKey: value } }
   defaultLevelSettingsByLevel: {},
+  groupIdByInterior: {}, // { interiorName: groupId } - same grouping shown on every moon
+  groupColors: {}, // { groupId: colorHex }
+  nextGroupId: 1,
+  lockedInteriors: {}, // { interiorName: true } - locked rows can't be edited by user or program
 };
+
+// Cycled through in order as new groups are created.
+const GROUP_COLOR_PALETTE = [
+  "#e5484d", "#3fae4a", "#4a90d9", "#e5c100", "#b968f2",
+  "#f2994a", "#2dd4bf", "#f472b6", "#8bc34a", "#60a5fa",
+];
 
 // Must exactly match web_ui.py's LEVEL_SETTING_KEYS strings.
 const LEVEL_SETTING_FIELDS = [
@@ -42,6 +41,52 @@ const LEVEL_SETTING_FIELDS = [
   { group: "Enemy", key: "Enemy Settings - Outside Daytime Enemies Spawning List", label: "Outside Daytime Enemies Spawning List", type: "string" },
   { group: "Enemy", key: "Enemy Settings - Outside Nighttime Enemies Spawning List", label: "Outside Nighttime Enemies Spawning List", type: "string" },
 ];
+
+// Must exactly match web_ui.py's DUNGEON_SIZE_SETTING_KEYS strings.
+const DUNGEON_SIZE_SETTING_FIELDS = [
+  { key: "General Settings - Minimum Dungeon Size Multiplier", label: "Min Size Mult." },
+  { key: "General Settings - Maximum Dungeon Size Multiplier", label: "Max Size Mult." },
+  { key: "General Settings - Restrict Dungeon Size Scaler", label: "Restrict Size Scaler" },
+];
+
+// Colors + CSS class for each enemy list's sideways bar graph.
+const ENEMY_BAR_COLORS = {
+  "Enemy Settings - Inside Enemies Spawning List": { accent: "#e5c100", track: "#3a3218", cssClass: "enemy-bar-yellow" },
+  "Enemy Settings - Outside Daytime Enemies Spawning List": { accent: "#3fae4a", track: "#1c3620", cssClass: "enemy-bar-green" },
+  "Enemy Settings - Outside Nighttime Enemies Spawning List": { accent: "#d1453b", track: "#3a1e1c", cssClass: "enemy-bar-red" },
+};
+
+// Color for the per-interior weight bar graph on the "Interior Weights by Level" table.
+const WEIGHT_BAR_COLOR = { accent: "#4a90d9", track: "#182a38", cssClass: "weight-bar-slider" };
+
+// Paints a slider's fill as a solid-color gradient up to its current value/max ratio.
+function paintBarSlider(slider, colors) {
+  const pct = (Number(slider.value) / Number(slider.max || 1)) * 100;
+  slider.style.background =
+    `linear-gradient(to right, ${colors.accent} 0%, ${colors.accent} ${pct}%, ${colors.track} ${pct}%, ${colors.track} 100%)`;
+}
+
+// Parses a "Name:Weight,Name2:Weight2" list into [[name, weight], ...],
+// preserving order. Mirrors web_ui.py's PAIR_RE (name may contain colons -
+// the LAST colon separates the name from the weight) and skips unparsable
+// entries (e.g. a literal "Default Values Were Empty" placeholder).
+function parseNamedWeightList(raw) {
+  const pairs = [];
+  for (const chunk of (raw || "").split(",")) {
+    const trimmed = chunk.trim();
+    const idx = trimmed.lastIndexOf(":");
+    if (idx <= 0) continue;
+    const name = trimmed.slice(0, idx).trim();
+    const weight = parseInt(trimmed.slice(idx + 1).trim(), 10);
+    if (!name || !Number.isFinite(weight)) continue;
+    pairs.push([name, weight]);
+  }
+  return pairs;
+}
+
+function serializeNamedWeightList(pairs) {
+  return pairs.map(([name, weight]) => `${name}:${weight}`).join(",");
+}
 
 function levelTags(category) {
   return category.startsWith("Vanilla") ? ["Vanilla"] : ["Custom", "Modded"];
@@ -64,6 +109,79 @@ function isBlacklisted(dungeonName) {
     if (entry === nameLower) return true;
     return dungeon ? Object.keys(dungeon.dynamicTagWeights).some((tag) => tag.toLowerCase() === entry) : false;
   });
+}
+
+function groupColorFor(groupId) {
+  if (!state.groupColors[groupId]) {
+    const usedCount = Object.keys(state.groupColors).length;
+    state.groupColors[groupId] = GROUP_COLOR_PALETTE[usedCount % GROUP_COLOR_PALETTE.length];
+  }
+  return state.groupColors[groupId];
+}
+
+function groupMembers(groupId) {
+  return state.interiorNames.filter((name) => state.groupIdByInterior[name] === groupId);
+}
+
+// Dragging one interior onto another groups them (merging their groups if
+// both already belong to one), so a group can grow to 2, 3, 4+ members.
+function mergeIntoGroup(sourceName, targetName) {
+  if (sourceName === targetName) return;
+  const sourceGroup = state.groupIdByInterior[sourceName];
+  const targetGroup = state.groupIdByInterior[targetName];
+
+  if (sourceGroup && targetGroup) {
+    if (sourceGroup === targetGroup) return;
+    for (const name of groupMembers(sourceGroup)) {
+      state.groupIdByInterior[name] = targetGroup;
+    }
+    delete state.groupColors[sourceGroup];
+    return;
+  }
+  if (targetGroup) {
+    state.groupIdByInterior[sourceName] = targetGroup;
+    return;
+  }
+  if (sourceGroup) {
+    state.groupIdByInterior[targetName] = sourceGroup;
+    return;
+  }
+
+  const newGroupId = state.nextGroupId++;
+  state.groupIdByInterior[sourceName] = newGroupId;
+  state.groupIdByInterior[targetName] = newGroupId;
+  groupColorFor(newGroupId);
+}
+
+function removeFromGroup(name) {
+  const groupId = state.groupIdByInterior[name];
+  if (!groupId) return;
+  delete state.groupIdByInterior[name];
+  const remaining = groupMembers(groupId);
+  if (remaining.length < 2) {
+    // A group of fewer than 2 members isn't a group anymore - dissolve it.
+    for (const remainingName of remaining) delete state.groupIdByInterior[remainingName];
+    delete state.groupColors[groupId];
+  }
+}
+
+// Reorders interiorNames so every group's members sit adjacent to each
+// other (at the position of their earliest member), while ungrouped
+// interiors keep their original relative order.
+function orderedInteriorNames() {
+  const emitted = new Set();
+  const order = [];
+  for (const name of state.interiorNames) {
+    if (emitted.has(name)) continue;
+    const groupId = state.groupIdByInterior[name];
+    const namesToEmit = groupId ? groupMembers(groupId) : [name];
+    for (const member of namesToEmit) {
+      if (emitted.has(member)) continue;
+      order.push(member);
+      emitted.add(member);
+    }
+  }
+  return order;
 }
 
 function setStatus(message) {
@@ -104,7 +222,6 @@ async function loadData() {
     state.defaultLevelSettingsByLevel[levelName] = { ...settings };
   }
 
-  populateBalanceTable();
   populateLevelSelect();
   renderLevelPage();
   setStatus("");
@@ -168,35 +285,6 @@ function computeOddsForLevel(levelName, category) {
   return odds;
 }
 
-function populateBalanceTable() {
-  const tbody = document.getElementById("balanceTableBody");
-  tbody.innerHTML = "";
-  for (const level of state.levels) {
-    const row = document.createElement("tr");
-
-    const nameCell = document.createElement("td");
-    nameCell.textContent = level.name;
-    row.appendChild(nameCell);
-
-    const percentCell = document.createElement("td");
-    const input = document.createElement("input");
-    input.type = "number";
-    input.step = "any";
-    input.min = "0";
-    input.max = "99";
-    const isVanilla = level.category.startsWith("Vanilla");
-    const defaultPercent = level.name in DEFAULT_LEVEL_MODDED_CHANCE_PERCENT
-      ? DEFAULT_LEVEL_MODDED_CHANCE_PERCENT[level.name]
-      : (isVanilla ? DEFAULT_VANILLA_LEVEL_MODDED_CHANCE_PERCENT : DEFAULT_MODDED_LEVEL_MODDED_CHANCE_PERCENT);
-    input.value = defaultPercent;
-    input.dataset.level = level.name;
-    percentCell.appendChild(input);
-    row.appendChild(percentCell);
-
-    tbody.appendChild(row);
-  }
-}
-
 function populateLevelSelect() {
   const select = document.getElementById("levelSelect");
   select.innerHTML = "";
@@ -220,13 +308,87 @@ function renderLevelPage() {
   const tbody = document.getElementById("levelWeightsBody");
   tbody.innerHTML = "";
 
-  for (const interiorName of state.interiorNames) {
+  // Fixed baseline scale for the weight bars so typical values (0-1000) stay
+  // readable; a row's own value can push its bar's max higher (e.g. vanilla
+  // dungeons occasionally use the game's 9999 weight cap) without squishing
+  // every other interior's bar down to an invisible sliver.
+  const WEIGHT_BAR_BASELINE_MAX = 1000;
+
+  for (const interiorName of orderedInteriorNames()) {
     const row = document.createElement("tr");
     row.dataset.interior = interiorName;
+    const locked = !!state.lockedInteriors[interiorName];
     row.classList.toggle("blacklisted", isBlacklisted(interiorName));
+    row.classList.toggle("locked", locked);
+
+    row.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      row.classList.add("drag-over");
+    });
+    row.addEventListener("dragleave", () => row.classList.remove("drag-over"));
+    row.addEventListener("drop", (e) => {
+      e.preventDefault();
+      row.classList.remove("drag-over");
+      const sourceName = e.dataTransfer.getData("text/plain");
+      if (!sourceName || sourceName === interiorName) return;
+      mergeIntoGroup(sourceName, interiorName);
+      renderLevelPage();
+      setStatus(`Grouped "${sourceName}" with "${interiorName}" (same color on every moon).`);
+    });
+
+    const lockCell = document.createElement("td");
+    const lockBtn = document.createElement("button");
+    lockBtn.type = "button";
+    lockBtn.className = "lock-btn";
+    lockBtn.textContent = locked ? "\u{1F512}" : "\u{1F513}";
+    lockBtn.title = locked ? "Unlock this row" : "Lock this row (blocks edits by you or any tool button)";
+    lockBtn.addEventListener("click", () => {
+      if (state.lockedInteriors[interiorName]) {
+        delete state.lockedInteriors[interiorName];
+      } else {
+        state.lockedInteriors[interiorName] = true;
+      }
+      renderLevelPage();
+    });
+    lockCell.appendChild(lockBtn);
+    row.appendChild(lockCell);
 
     const nameCell = document.createElement("td");
-    nameCell.textContent = interiorName;
+    const handle = document.createElement("span");
+    handle.className = "drag-handle";
+    handle.textContent = "\u22ee\u22ee";
+    handle.draggable = true;
+    handle.title = "Drag onto another interior's row to group them";
+    handle.addEventListener("dragstart", (e) => {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", interiorName);
+      row.classList.add("dragging");
+    });
+    handle.addEventListener("dragend", () => row.classList.remove("dragging"));
+    nameCell.appendChild(handle);
+
+    const nameLabel = document.createElement("span");
+    nameLabel.textContent = interiorName;
+    nameCell.appendChild(nameLabel);
+
+    const groupId = state.groupIdByInterior[interiorName];
+    if (groupId) {
+      const color = groupColorFor(groupId);
+      nameLabel.style.color = color;
+      nameLabel.style.fontWeight = "600";
+      nameCell.style.borderLeft = `4px solid ${color}`;
+      const ungroupBtn = document.createElement("button");
+      ungroupBtn.type = "button";
+      ungroupBtn.className = "ungroup-btn";
+      ungroupBtn.textContent = "\u00d7";
+      ungroupBtn.title = "Remove from group";
+      ungroupBtn.addEventListener("click", () => {
+        removeFromGroup(interiorName);
+        renderLevelPage();
+      });
+      nameCell.appendChild(ungroupBtn);
+    }
     row.appendChild(nameCell);
 
     const weightCell = document.createElement("td");
@@ -234,14 +396,57 @@ function renderLevelPage() {
     input.type = "number";
     input.step = "any";
     input.value = (state.weightsByDungeonLevel[interiorName] || {})[level.name] ?? 0;
+    input.disabled = locked;
     input.addEventListener("input", () => {
       const value = parseFloat(input.value);
       if (!state.weightsByDungeonLevel[interiorName]) state.weightsByDungeonLevel[interiorName] = {};
       state.weightsByDungeonLevel[interiorName][level.name] = Number.isFinite(value) ? value : 0;
       updateLevelOddsColumn();
+      const clamped = Number.isFinite(value) ? value : 0;
+      weightSlider.max = String(Math.max(WEIGHT_BAR_BASELINE_MAX, clamped * 1.2));
+      weightSlider.value = String(clamped);
+      paintBarSlider(weightSlider, WEIGHT_BAR_COLOR);
     });
     weightCell.appendChild(input);
     row.appendChild(weightCell);
+
+    // Sideways, slidable bar graph mirroring the enemy weight bars - dragging
+    // it edits the same weight as the number input above, in real time.
+    const weightBarCell = document.createElement("td");
+    const weightSlider = document.createElement("input");
+    weightSlider.type = "range";
+    weightSlider.className = `enemy-bar-slider ${WEIGHT_BAR_COLOR.cssClass}`;
+    weightSlider.min = "0";
+    weightSlider.max = String(Math.max(WEIGHT_BAR_BASELINE_MAX, Number(input.value) * 1.2));
+    weightSlider.step = "any";
+    weightSlider.value = String(input.value);
+    weightSlider.disabled = locked;
+    weightSlider.addEventListener("input", () => {
+      input.value = weightSlider.value;
+      input.dispatchEvent(new Event("input"));
+    });
+    paintBarSlider(weightSlider, WEIGHT_BAR_COLOR);
+    weightBarCell.appendChild(weightSlider);
+    row.appendChild(weightBarCell);
+
+    // Dungeon size settings live on the interior itself (not per-level), so
+    // these 3 columns edit the same value regardless of which level is shown.
+    const dungeon = state.dungeons.find((d) => d.name === interiorName);
+    for (const field of DUNGEON_SIZE_SETTING_FIELDS) {
+      const sizeCell = document.createElement("td");
+      const sizeInput = document.createElement("input");
+      sizeInput.type = "number";
+      sizeInput.step = "any";
+      sizeInput.value = dungeon?.sizeSettings?.[field.key] ?? "";
+      sizeInput.disabled = !dungeon || locked;
+      sizeInput.addEventListener("input", () => {
+        if (!dungeon) return;
+        if (!dungeon.sizeSettings) dungeon.sizeSettings = {};
+        dungeon.sizeSettings[field.key] = sizeInput.value;
+      });
+      sizeCell.appendChild(sizeInput);
+      row.appendChild(sizeCell);
+    }
 
     const oddsCell = document.createElement("td");
     oddsCell.className = "level-odds-cell";
@@ -315,7 +520,74 @@ function renderLevelSettingsPanel() {
 
     row.appendChild(input);
     groupDiv.appendChild(row);
+
+    // Enemy spawn lists also get a sideways, slidable bar graph of weights
+    // beneath the raw textarea - editing either one keeps the other in sync.
+    const barColors = ENEMY_BAR_COLORS[field.key];
+    if (barColors) {
+      const barsContainer = document.createElement("div");
+      barsContainer.className = "enemy-bars";
+      groupDiv.appendChild(barsContainer);
+      input.addEventListener("input", () => renderEnemyBars(barsContainer, barColors, level.name, field.key, input));
+      renderEnemyBars(barsContainer, barColors, level.name, field.key, input);
+    }
   }
+}
+
+// Renders one slider row per "Name:Weight" entry in the textarea's current
+// value. Dragging a slider updates its weight, repaints the bar's fill, and
+// writes the serialized list back into both the textarea and app state.
+function renderEnemyBars(container, barColors, levelName, fieldKey, textareaEl) {
+  const pairs = parseNamedWeightList(textareaEl.value);
+  container.innerHTML = "";
+  if (pairs.length === 0) return;
+
+  const maxWeight = Math.round(Math.max(100, ...pairs.map(([, weight]) => weight)) * 1.2);
+
+  pairs.forEach(([name, weight], index) => {
+    const row = document.createElement("div");
+    row.className = "enemy-bar-row";
+
+    const label = document.createElement("span");
+    label.className = "enemy-bar-label";
+    label.textContent = name;
+    row.appendChild(label);
+
+    const slider = document.createElement("input");
+    slider.type = "range";
+    slider.className = `enemy-bar-slider ${barColors.cssClass}`;
+    slider.min = "0";
+    slider.max = String(maxWeight);
+    slider.value = String(weight);
+    row.appendChild(slider);
+
+    const valueLabel = document.createElement("span");
+    valueLabel.className = "enemy-bar-value";
+    valueLabel.textContent = String(weight);
+    row.appendChild(valueLabel);
+
+    const paintSlider = () => paintBarSlider(slider, barColors);
+    paintSlider();
+
+    slider.addEventListener("input", () => {
+      pairs[index][1] = parseInt(slider.value, 10);
+      valueLabel.textContent = slider.value;
+      paintSlider();
+      const serialized = serializeNamedWeightList(pairs);
+      textareaEl.value = serialized;
+      setLevelSetting(levelName, fieldKey, serialized);
+    });
+
+    container.appendChild(row);
+  });
+}
+
+function resetLevelSettingsToDefault() {
+  const level = state.levels[state.currentLevelIndex];
+  if (!level) return;
+  state.levelSettingsByLevel[level.name] = { ...(state.defaultLevelSettingsByLevel[level.name] || {}) };
+  renderLevelSettingsPanel();
+  setStatus(`Reset "${level.name}"'s moon settings to their .cfg defaults.`);
 }
 
 // Grows past 2 decimals when needed so a tiny-but-nonzero odds value (e.g. a
@@ -348,119 +620,17 @@ function goToLevelPage(delta) {
   renderLevelPage();
 }
 
-// Same math as balance_interior_weights.py's main(), ported to run live in
-// the browser against the currently edited weights + toggle state.
-// Vanilla level to copy vanilla-dungeon weights from when a level has none
-// configured at all (e.g. March has no entry in any of the 3 vanilla dungeon
-// sections' Manual Level Names List, so its real vanilla weight is 0 and the
-// "target modded %" can never be reflected in the actual odds otherwise).
-const VANILLA_WEIGHT_TEMPLATE_LEVEL = "Adamance";
-
-function applyBalance() {
-  const vanillaDungeons = state.dungeons.filter((d) => d.category === "Vanilla Dungeon" && !isBlacklisted(d.name)).map((d) => d.name);
-  const moddedDungeons = state.dungeons.filter((d) => d.category === "Custom Dungeon" && !isBlacklisted(d.name)).map((d) => d.name);
-
-  const percentInputs = document.querySelectorAll("#balanceTableBody input[type='number']");
-  const percentByLevel = {};
-  for (const input of percentInputs) {
-    const value = parseFloat(input.value);
-    percentByLevel[input.dataset.level] = Number.isFinite(value) ? value : 0;
-  }
-
-  let clampedAnyWeight = false;
-
-  for (const level of state.levels) {
-    const tags = levelTags(level.category);
-    let percent = percentByLevel[level.name] ?? 0;
-    if (percent >= 100) percent = 99;
-    const p = Math.max(percent, 0) / 100;
-
-    // Vanilla dungeons with literally no configured weight for this level
-    // (e.g. no Manual Level Names List entry at all) start from a copied
-    // template so there's something to scale.
-    const manualVanillaTotal = vanillaDungeons.reduce((sum, d) => sum + ((state.weightsByDungeonLevel[d] || {})[level.name] || 0), 0);
-    if (manualVanillaTotal <= 0 && level.name !== VANILLA_WEIGHT_TEMPLATE_LEVEL) {
-      for (const d of vanillaDungeons) {
-        const templateWeight = (state.weightsByDungeonLevel[d] || {})[VANILLA_WEIGHT_TEMPLATE_LEVEL] || 0;
-        if (!state.weightsByDungeonLevel[d]) state.weightsByDungeonLevel[d] = {};
-        state.weightsByDungeonLevel[d][level.name] = clampWeight(templateWeight);
-      }
-    }
-
-    if (p <= 0) {
-      // LethalLevelLoader always takes MAX(manual, dynamic), so a modded
-      // dungeon with its own dynamic tag weight can never be pushed to a
-      // true 0% this way - but zeroing the manual weight is the closest
-      // this tool can get, and matches dungeons that have no dynamic
-      // weight at all.
-      for (const d of moddedDungeons) {
-        if (!state.weightsByDungeonLevel[d]) state.weightsByDungeonLevel[d] = {};
-        state.weightsByDungeonLevel[d][level.name] = 0;
-      }
-      continue;
-    }
-
-    // LethalLevelLoader takes the MAX of a dungeon's manual weight and its
-    // dynamic tag weight for this level - never a sum - so the only way to
-    // give every modded dungeon the exact same effective weight is to set
-    // each one's manual weight to a value at least as high as the largest
-    // dynamic tag weight among them. That guarantees the manual weight
-    // "wins" the MAX for every modded dungeon, making them all truly equal.
-    const moddedDynamicWeights = moddedDungeons.map((d) => dynamicComponentFor(d, tags));
-    const moddedFloor = moddedDynamicWeights.length ? Math.max(...moddedDynamicWeights, 1) : 1;
-    const perDungeonWeight = clampWeight(moddedFloor);
-    if (perDungeonWeight !== moddedFloor) clampedAnyWeight = true;
-    const actualModdedEffectiveTotal = perDungeonWeight * moddedDungeons.length;
-
-    // Vanilla dungeons keep their existing relative ratio (or the copied
-    // template ratio above), scaled so their total hits whatever's needed
-    // to make the modded share equal the requested percentage. Vanilla
-    // dungeons in this cfg never carry a dynamic tag weight of their own,
-    // so their effective weight is just their (now scaled) manual weight.
-    const vanillaManualBeforeScale = vanillaDungeons.reduce((sum, d) => sum + ((state.weightsByDungeonLevel[d] || {})[level.name] || 0), 0);
-    const requiredVanillaTotal = (actualModdedEffectiveTotal * (1 - p)) / p;
-    const scale = vanillaManualBeforeScale > 0 ? requiredVanillaTotal / vanillaManualBeforeScale : 0;
-    for (const d of vanillaDungeons) {
-      if (!state.weightsByDungeonLevel[d]) state.weightsByDungeonLevel[d] = {};
-      const current = state.weightsByDungeonLevel[d][level.name] || 0;
-      const updated = vanillaManualBeforeScale > 0
-        ? current * scale
-        : (vanillaDungeons.length ? requiredVanillaTotal / vanillaDungeons.length : 0);
-      const clamped = clampWeight(updated);
-      if (clamped !== Math.round(updated)) clampedAnyWeight = true;
-      state.weightsByDungeonLevel[d][level.name] = clamped;
-    }
-
-    for (const d of moddedDungeons) {
-      if (!state.weightsByDungeonLevel[d]) state.weightsByDungeonLevel[d] = {};
-      state.weightsByDungeonLevel[d][level.name] = perDungeonWeight;
-    }
-  }
-
-  // Blacklisted interiors are always forced to 0, overriding anything else
-  // applied above.
-  for (const interiorName of state.interiorNames) {
-    if (!isBlacklisted(interiorName)) continue;
-    if (!state.weightsByDungeonLevel[interiorName]) state.weightsByDungeonLevel[interiorName] = {};
-    for (const level of state.levels) {
-      state.weightsByDungeonLevel[interiorName][level.name] = 0;
-    }
-  }
-
-  renderLevelPage();
-  setStatus(
-    clampedAnyWeight
-      ? "Balanced modded weights applied (some weights hit the game's 9999 cap, so their exact target % may not be reachable)."
-      : "Balanced modded weights applied."
-  );
-}
-
 function applyResetToDefault() {
   for (const interiorName of state.interiorNames) {
+    if (state.lockedInteriors[interiorName]) continue;
     state.weightsByDungeonLevel[interiorName] = { ...(state.defaultWeightsByDungeonLevel[interiorName] || {}) };
   }
   for (const level of state.levels) {
     state.levelSettingsByLevel[level.name] = { ...(state.defaultLevelSettingsByLevel[level.name] || {}) };
+  }
+  for (const dungeon of state.dungeons) {
+    if (state.lockedInteriors[dungeon.name]) continue;
+    dungeon.sizeSettings = { ...(dungeon.sizeSettingsDefaults || {}) };
   }
   state.resetToDefaultRequested = true;
   renderLevelPage();
@@ -470,6 +640,30 @@ function applyResetToDefault() {
 function applyCleanReferences() {
   state.cleanReferencesRequested = true;
   setStatus("Uninstalled level references will be removed on download.");
+}
+
+// Fills the given weight into every unlocked interior for the currently
+// shown moon only - locked rows are skipped entirely.
+function applyQuickBalance() {
+  const level = state.levels[state.currentLevelIndex];
+  if (!level) return;
+  const raw = parseInt(document.getElementById("quickBalanceValue").value, 10);
+  const value = Number.isFinite(raw) ? raw : 0;
+  let skippedLocked = false;
+  for (const interiorName of state.interiorNames) {
+    if (state.lockedInteriors[interiorName]) {
+      skippedLocked = true;
+      continue;
+    }
+    if (!state.weightsByDungeonLevel[interiorName]) state.weightsByDungeonLevel[interiorName] = {};
+    state.weightsByDungeonLevel[interiorName][level.name] = value;
+  }
+  renderLevelPage();
+  setStatus(
+    skippedLocked
+      ? `Set weight to ${value} for all unlocked interiors on "${level.name}" (locked rows left untouched).`
+      : `Set weight to ${value} for all interiors on "${level.name}".`
+  );
 }
 
 // Zeroes every dungeon's "Dynamic Level Tags List" weight so odds are
@@ -496,6 +690,11 @@ async function downloadCfg() {
     }));
   }
 
+  const dungeonSizeSettings = {};
+  for (const dungeon of state.dungeons) {
+    if (dungeon.sizeSettings) dungeonSizeSettings[dungeon.name] = dungeon.sizeSettings;
+  }
+
   const res = await fetch("/api/download", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -505,6 +704,7 @@ async function downloadCfg() {
       emptyDungeonInjections: state.emptyDungeonInjectionsRequested,
       weights,
       levelSettings: state.levelSettingsByLevel,
+      dungeonSizeSettings,
     }),
   });
 
@@ -530,11 +730,7 @@ document.getElementById("downloadBtn").addEventListener("click", downloadCfg);
 document.getElementById("resetBtn").addEventListener("click", applyResetToDefault);
 document.getElementById("cleanBtn").addEventListener("click", applyCleanReferences);
 document.getElementById("emptyDungeonInjectionsBtn").addEventListener("click", applyEmptyDungeonInjections);
-document.getElementById("toggleBalanceBtn").addEventListener("click", () => {
-  const body = document.getElementById("balanceBody");
-  body.hidden = !body.hidden;
-});
-document.getElementById("applyBalanceBtn").addEventListener("click", applyBalance);
+document.getElementById("quickBalanceBtn").addEventListener("click", applyQuickBalance);
 
 document.getElementById("prevLevelBtn").addEventListener("click", () => goToLevelPage(-1));
 document.getElementById("nextLevelBtn").addEventListener("click", () => goToLevelPage(1));
@@ -560,5 +756,6 @@ document.getElementById("toggleLevelSettingsBtn").addEventListener("click", () =
   const body = document.getElementById("levelSettingsBody");
   body.hidden = !body.hidden;
 });
+document.getElementById("resetLevelSettingsBtn").addEventListener("click", resetLevelSettingsToDefault);
 
 loadData();

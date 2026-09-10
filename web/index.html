@@ -27,23 +27,6 @@
     </div>
   </section>
 
-  <section id="balancePanel">
-    <button id="toggleBalanceBtn">Balance Interior Weights &#9662;</button>
-    <div id="balanceBody" hidden>
-      <p class="subtitle">Target "chance of landing in any modded interior" per level. Applies instantly using the current weights.</p>
-      <table id="balanceTable">
-        <thead>
-          <tr>
-            <th>Level</th>
-            <th>Target Modded %</th>
-          </tr>
-        </thead>
-        <tbody id="balanceTableBody"></tbody>
-      </table>
-      <button id="applyBalanceBtn">Apply Balance</button>
-    </div>
-  </section>
-
   <section id="byLevelPanel">
     <button id="toggleByLevelBtn">Interior Weights by Level &#9662;</button>
     <div id="byLevelBody">
@@ -54,11 +37,22 @@
         <span id="levelPageLabel"></span>
       </section>
 
+      <section id="quickBalanceBar">
+        <label for="quickBalanceValue">Set weight for unlocked rows:</label>
+        <input type="number" id="quickBalanceValue" step="1" value="100">
+        <button id="quickBalanceBtn">Apply to Unlocked Rows</button>
+      </section>
+
       <table id="levelWeightsTable">
         <thead>
           <tr>
+            <th>Lock</th>
             <th>Interior</th>
             <th>Weight</th>
+            <th>Weight Bar</th>
+            <th>Min Size Mult.</th>
+            <th>Max Size Mult.</th>
+            <th>Restrict Size Scaler</th>
             <th>Odds for this level</th>
           </tr>
         </thead>
@@ -70,7 +64,10 @@
   <section id="levelSettingsPanel">
     <button id="toggleLevelSettingsBtn">Moon Settings &#9662;</button>
     <div id="levelSettingsBody" hidden>
-      <p class="subtitle">Configurable settings for the currently selected moon (route price, scrap, and enemy spawn options). Enabling any change here force-enables "Enable Content Configuration" for this level when downloaded.</p>
+      <div id="levelSettingsToolbar">
+        <p class="subtitle">Configurable settings for the currently selected moon (route price, scrap, and enemy spawn options). Enabling any change here force-enables "Enable Content Configuration" for this level when downloaded.</p>
+        <button id="resetLevelSettingsBtn">Reset Moon Settings to Default</button>
+      </div>
       <div id="levelSettingsFields"></div>
     </div>
   </section>

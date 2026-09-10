@@ -75,12 +75,20 @@ LEVEL_SETTING_KEYS = [
     "Enemy Settings - Outside Nighttime Enemies Spawning List",
 ]
 
+# Per-interior (dungeon) size settings shown/edited in the "Interior Weights
+# by Level" table, in the same order they appear in each Custom Dungeon/
+# Vanilla Dungeon section.
+DUNGEON_SIZE_SETTING_KEYS = [
+    "General Settings - Minimum Dungeon Size Multiplier",
+    "General Settings - Maximum Dungeon Size Multiplier",
+    "General Settings - Restrict Dungeon Size Scaler",
+]
+
 STATIC_CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
     ".js": "text/javascript; charset=utf-8",
     ".css": "text/css; charset=utf-8",
 }
-
 
 class Section:
     def __init__(self, category: str, name: str):
@@ -323,6 +331,17 @@ def apply_level_setting_updates(lines: list[str], start: int, end: int, updates:
         set_field(lines, start, end, ENABLE_CONTENT_CONFIG_KEY, "true")
 
 
+def apply_dungeon_size_setting_updates(lines: list[str], start: int, end: int, updates: dict[str, str]) -> None:
+    for key, value in updates.items():
+        if key not in DUNGEON_SIZE_SETTING_KEYS:
+            continue
+        set_field(lines, start, end, key, str(value))
+
+    enabled = (get_field(lines, start, end, ENABLE_CONTENT_CONFIG_KEY) or "").strip().lower()
+    if enabled != "true":
+        set_field(lines, start, end, ENABLE_CONTENT_CONFIG_KEY, "true")
+
+
 # ---------------------------------------------------------------------------
 # API handlers
 # ---------------------------------------------------------------------------
@@ -338,10 +357,16 @@ def build_data_payload() -> dict[str, object]:
     dungeons_payload = []
     for dungeon in dungeon_sections:
         tag_weights = parse_int_weight_pairs(dungeon.effective(DYNAMIC_LEVEL_TAGS_KEY))
+        size_settings = {key: dungeon.effective(key) for key in DUNGEON_SIZE_SETTING_KEYS}
+        size_settings_defaults = {
+            key: dungeon.fields.get(key, ("", ""))[1] for key in DUNGEON_SIZE_SETTING_KEYS
+        }
         dungeons_payload.append({
             "name": dungeon.name,
             "category": dungeon.category,
             "dynamicTagWeights": tag_weights,
+            "sizeSettings": size_settings,
+            "sizeSettingsDefaults": size_settings_defaults,
         })
 
     weights = json.loads(WEIGHTS_JSON_PATH.read_text(encoding="utf-8")) if WEIGHTS_JSON_PATH.exists() else {}
@@ -393,6 +418,7 @@ def build_download_cfg(
     empty_dungeon_injections: bool,
     weights: dict[str, list[dict[str, object]]],
     level_settings: dict[str, dict[str, str]],
+    dungeon_size_settings: dict[str, dict[str, str]],
 ) -> str:
     lines = SOURCE_CFG_PATH.read_text(encoding="utf-8").splitlines(keepends=True)
 
@@ -433,6 +459,13 @@ def build_download_cfg(
             continue
         start, end = match
         apply_level_setting_updates(lines, start, end, updates)
+
+    for dungeon_name, updates in dungeon_size_settings.items():
+        match = dungeon_by_name.get(dungeon_name.strip().lower())
+        if match is None:
+            continue
+        start, end = match
+        apply_dungeon_size_setting_updates(lines, start, end, updates)
 
     return "".join(lines)
 
@@ -489,6 +522,7 @@ class Handler(BaseHTTPRequestHandler):
                 bool(body.get("emptyDungeonInjections")),
                 body.get("weights") or {},
                 body.get("levelSettings") or {},
+                body.get("dungeonSizeSettings") or {},
             )
         except Exception as exc:  # noqa: BLE001 - surface any error to the browser
             self._send_json({"error": str(exc)}, status=400)

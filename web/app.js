@@ -23,6 +23,7 @@ const state = {
 const GROUP_COLOR_PALETTE = [
   "#e5484d", "#3fae4a", "#4a90d9", "#e5c100", "#b968f2",
   "#f2994a", "#2dd4bf", "#f472b6", "#8bc34a", "#60a5fa",
+  "#9c591d", "#2d4cd4", "#356d00", "#6b7c8f", "#673280",
 ];
 
 // Must exactly match web_ui.py's LEVEL_SETTING_KEYS strings.

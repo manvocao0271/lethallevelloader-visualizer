@@ -297,6 +297,183 @@ function populateLevelSelect() {
   });
 }
 
+// Sums this interior's own manual weight across every level ("moon") - the
+// same number editable in the Weight column, just added up across all of
+// them - not the effective (max-with-dynamic-tag) weight used for odds.
+// A blacklisted interior's weight is always effectively 0 on every level
+// regardless of whether the row is also locked, so its total is forced to
+// 0 too rather than showing a stale sum that no longer applies anywhere.
+function computeCumulativeWeight(interiorName) {
+  if (isBlacklisted(interiorName)) return 0;
+  const perLevel = state.weightsByDungeonLevel[interiorName] || {};
+  return state.levels.reduce((sum, lvl) => sum + clampWeight(perLevel[lvl.name] || 0), 0);
+}
+
+function updateCumulativeCell(interiorName) {
+  const cell = document.querySelector(`.cumulative-weight-cell[data-interior="${CSS.escape(interiorName)}"]`);
+  if (cell) cell.textContent = String(computeCumulativeWeight(interiorName));
+}
+
+// Builds one <tr> for the "Interior Weights by Level" table. Shared by both
+// the whitelisted tbody and the blacklisted-section tbody below it.
+function buildInteriorRow(interiorName, level, WEIGHT_BAR_BASELINE_MAX) {
+  const row = document.createElement("tr");
+  row.dataset.interior = interiorName;
+  const locked = !!state.lockedInteriors[interiorName];
+  const blacklisted = isBlacklisted(interiorName);
+  row.classList.toggle("blacklisted", blacklisted);
+  row.classList.toggle("locked", locked);
+
+  row.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    row.classList.add("drag-over");
+  });
+  row.addEventListener("dragleave", () => row.classList.remove("drag-over"));
+  row.addEventListener("drop", (e) => {
+    e.preventDefault();
+    row.classList.remove("drag-over");
+    const sourceName = e.dataTransfer.getData("text/plain");
+    if (!sourceName || sourceName === interiorName) return;
+    mergeIntoGroup(sourceName, interiorName);
+    renderLevelPage();
+    setStatus(`Grouped "${sourceName}" with "${interiorName}" (same color on every moon).`);
+  });
+
+  const lockCell = document.createElement("td");
+  const lockBtn = document.createElement("button");
+  lockBtn.type = "button";
+  lockBtn.className = "lock-btn";
+  lockBtn.textContent = locked ? "\u{1F512}" : "\u{1F513}";
+  lockBtn.title = locked ? "Unlock this row" : "Lock this row (blocks edits by you or any tool button)";
+  lockBtn.addEventListener("click", () => {
+    if (state.lockedInteriors[interiorName]) {
+      delete state.lockedInteriors[interiorName];
+    } else {
+      state.lockedInteriors[interiorName] = true;
+    }
+    renderLevelPage();
+  });
+  lockCell.appendChild(lockBtn);
+  row.appendChild(lockCell);
+
+  const nameCell = document.createElement("td");
+  const handle = document.createElement("span");
+  handle.className = "drag-handle";
+  handle.textContent = "\u22ee\u22ee";
+  handle.draggable = true;
+  handle.title = "Drag onto another interior's row to group them";
+  handle.addEventListener("dragstart", (e) => {
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", interiorName);
+    row.classList.add("dragging");
+  });
+  handle.addEventListener("dragend", () => row.classList.remove("dragging"));
+  nameCell.appendChild(handle);
+
+  const nameLabel = document.createElement("span");
+  nameLabel.textContent = interiorName;
+  nameCell.appendChild(nameLabel);
+
+  const groupId = state.groupIdByInterior[interiorName];
+  if (groupId) {
+    const color = groupColorFor(groupId);
+    nameLabel.style.color = color;
+    nameLabel.style.fontWeight = "600";
+    nameCell.style.borderLeft = `4px solid ${color}`;
+    const ungroupBtn = document.createElement("button");
+    ungroupBtn.type = "button";
+    ungroupBtn.className = "ungroup-btn";
+    ungroupBtn.textContent = "\u00d7";
+    ungroupBtn.title = "Remove from group";
+    ungroupBtn.addEventListener("click", () => {
+      removeFromGroup(interiorName);
+      renderLevelPage();
+    });
+    nameCell.appendChild(ungroupBtn);
+  }
+  row.appendChild(nameCell);
+
+  const weightCell = document.createElement("td");
+  const input = document.createElement("input");
+  input.type = "number";
+  input.step = "any";
+  const rawWeightValue = (state.weightsByDungeonLevel[interiorName] || {})[level.name] ?? 0;
+  // A blacklisted interior's weight is always forced to 0 - here, in the
+  // odds calc, and on download - and that override holds even if the row
+  // is also locked, so editing is disabled either way rather than leaving
+  // a stale nonzero value showing.
+  input.value = blacklisted ? 0 : rawWeightValue;
+  input.disabled = locked || blacklisted;
+  if (blacklisted) input.title = "Blacklisted interiors always use a weight of 0.";
+  input.addEventListener("input", () => {
+    const value = parseFloat(input.value);
+    if (!state.weightsByDungeonLevel[interiorName]) state.weightsByDungeonLevel[interiorName] = {};
+    state.weightsByDungeonLevel[interiorName][level.name] = Number.isFinite(value) ? value : 0;
+    updateLevelOddsColumn();
+    updateCumulativeCell(interiorName);
+    const clamped = Number.isFinite(value) ? value : 0;
+    weightSlider.max = String(Math.max(WEIGHT_BAR_BASELINE_MAX, clamped * 1.2));
+    weightSlider.value = String(clamped);
+    paintBarSlider(weightSlider, WEIGHT_BAR_COLOR);
+  });
+  weightCell.appendChild(input);
+  row.appendChild(weightCell);
+
+  // Sideways, slidable bar graph mirroring the enemy weight bars - dragging
+  // it edits the same weight as the number input above, in real time.
+  const weightBarCell = document.createElement("td");
+  const weightSlider = document.createElement("input");
+  weightSlider.type = "range";
+  weightSlider.className = `enemy-bar-slider ${WEIGHT_BAR_COLOR.cssClass}`;
+  weightSlider.min = "0";
+  weightSlider.max = String(Math.max(WEIGHT_BAR_BASELINE_MAX, Number(input.value) * 1.2));
+  weightSlider.step = "any";
+  weightSlider.value = String(input.value);
+  weightSlider.disabled = locked || blacklisted;
+  weightSlider.addEventListener("input", () => {
+    input.value = weightSlider.value;
+    input.dispatchEvent(new Event("input"));
+  });
+  paintBarSlider(weightSlider, WEIGHT_BAR_COLOR);
+  weightBarCell.appendChild(weightSlider);
+  row.appendChild(weightBarCell);
+
+  // Dungeon size settings live on the interior itself (not per-level), so
+  // these 3 columns edit the same value regardless of which level is shown.
+  const dungeon = state.dungeons.find((d) => d.name === interiorName);
+  for (const field of DUNGEON_SIZE_SETTING_FIELDS) {
+    const sizeCell = document.createElement("td");
+    const sizeInput = document.createElement("input");
+    sizeInput.type = "number";
+    sizeInput.step = "any";
+    sizeInput.value = dungeon?.sizeSettings?.[field.key] ?? "";
+    sizeInput.disabled = !dungeon || locked;
+    sizeInput.addEventListener("input", () => {
+      if (!dungeon) return;
+      if (!dungeon.sizeSettings) dungeon.sizeSettings = {};
+      dungeon.sizeSettings[field.key] = sizeInput.value;
+    });
+    sizeCell.appendChild(sizeInput);
+    row.appendChild(sizeCell);
+  }
+
+  const oddsCell = document.createElement("td");
+  oddsCell.className = "level-odds-cell";
+  oddsCell.dataset.interior = interiorName;
+  row.appendChild(oddsCell);
+
+  // Read-only total of this interior's own weight across every moon, not
+  // just the one currently shown - never editable from this column.
+  const cumulativeCell = document.createElement("td");
+  cumulativeCell.className = "cumulative-weight-cell";
+  cumulativeCell.dataset.interior = interiorName;
+  cumulativeCell.textContent = String(computeCumulativeWeight(interiorName));
+  row.appendChild(cumulativeCell);
+
+  return row;
+}
+
 function renderLevelPage() {
   const total = state.levels.length;
   if (total === 0) return;
@@ -307,7 +484,9 @@ function renderLevelPage() {
   document.getElementById("levelPageLabel").textContent = `${state.currentLevelIndex + 1} of ${total}`;
 
   const tbody = document.getElementById("levelWeightsBody");
+  const blacklistedTbody = document.getElementById("blacklistedWeightsBody");
   tbody.innerHTML = "";
+  blacklistedTbody.innerHTML = "";
 
   // Fixed baseline scale for the weight bars so typical values (0-1000) stay
   // readable; a row's own value can push its bar's max higher (e.g. vanilla
@@ -315,146 +494,33 @@ function renderLevelPage() {
   // every other interior's bar down to an invisible sliver.
   const WEIGHT_BAR_BASELINE_MAX = 1000;
 
+  // Blacklisted interiors are pulled out of the normal ordering entirely and
+  // rendered into their own tbody below, rather than interspersed among the
+  // whitelisted rows.
+  const blacklistedNames = [];
   for (const interiorName of orderedInteriorNames()) {
-    const row = document.createElement("tr");
-    row.dataset.interior = interiorName;
-    const locked = !!state.lockedInteriors[interiorName];
-    row.classList.toggle("blacklisted", isBlacklisted(interiorName));
-    row.classList.toggle("locked", locked);
-
-    row.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
-      row.classList.add("drag-over");
-    });
-    row.addEventListener("dragleave", () => row.classList.remove("drag-over"));
-    row.addEventListener("drop", (e) => {
-      e.preventDefault();
-      row.classList.remove("drag-over");
-      const sourceName = e.dataTransfer.getData("text/plain");
-      if (!sourceName || sourceName === interiorName) return;
-      mergeIntoGroup(sourceName, interiorName);
-      renderLevelPage();
-      setStatus(`Grouped "${sourceName}" with "${interiorName}" (same color on every moon).`);
-    });
-
-    const lockCell = document.createElement("td");
-    const lockBtn = document.createElement("button");
-    lockBtn.type = "button";
-    lockBtn.className = "lock-btn";
-    lockBtn.textContent = locked ? "\u{1F512}" : "\u{1F513}";
-    lockBtn.title = locked ? "Unlock this row" : "Lock this row (blocks edits by you or any tool button)";
-    lockBtn.addEventListener("click", () => {
-      if (state.lockedInteriors[interiorName]) {
-        delete state.lockedInteriors[interiorName];
-      } else {
-        state.lockedInteriors[interiorName] = true;
-      }
-      renderLevelPage();
-    });
-    lockCell.appendChild(lockBtn);
-    row.appendChild(lockCell);
-
-    const nameCell = document.createElement("td");
-    const handle = document.createElement("span");
-    handle.className = "drag-handle";
-    handle.textContent = "\u22ee\u22ee";
-    handle.draggable = true;
-    handle.title = "Drag onto another interior's row to group them";
-    handle.addEventListener("dragstart", (e) => {
-      e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData("text/plain", interiorName);
-      row.classList.add("dragging");
-    });
-    handle.addEventListener("dragend", () => row.classList.remove("dragging"));
-    nameCell.appendChild(handle);
-
-    const nameLabel = document.createElement("span");
-    nameLabel.textContent = interiorName;
-    nameCell.appendChild(nameLabel);
-
-    const groupId = state.groupIdByInterior[interiorName];
-    if (groupId) {
-      const color = groupColorFor(groupId);
-      nameLabel.style.color = color;
-      nameLabel.style.fontWeight = "600";
-      nameCell.style.borderLeft = `4px solid ${color}`;
-      const ungroupBtn = document.createElement("button");
-      ungroupBtn.type = "button";
-      ungroupBtn.className = "ungroup-btn";
-      ungroupBtn.textContent = "\u00d7";
-      ungroupBtn.title = "Remove from group";
-      ungroupBtn.addEventListener("click", () => {
-        removeFromGroup(interiorName);
-        renderLevelPage();
-      });
-      nameCell.appendChild(ungroupBtn);
+    const row = buildInteriorRow(interiorName, level, WEIGHT_BAR_BASELINE_MAX);
+    if (isBlacklisted(interiorName)) {
+      blacklistedNames.push(interiorName);
+      blacklistedTbody.appendChild(row);
+    } else {
+      tbody.appendChild(row);
     }
-    row.appendChild(nameCell);
+  }
 
-    const weightCell = document.createElement("td");
-    const input = document.createElement("input");
-    input.type = "number";
-    input.step = "any";
-    input.value = (state.weightsByDungeonLevel[interiorName] || {})[level.name] ?? 0;
-    input.disabled = locked;
-    input.addEventListener("input", () => {
-      const value = parseFloat(input.value);
-      if (!state.weightsByDungeonLevel[interiorName]) state.weightsByDungeonLevel[interiorName] = {};
-      state.weightsByDungeonLevel[interiorName][level.name] = Number.isFinite(value) ? value : 0;
-      updateLevelOddsColumn();
-      const clamped = Number.isFinite(value) ? value : 0;
-      weightSlider.max = String(Math.max(WEIGHT_BAR_BASELINE_MAX, clamped * 1.2));
-      weightSlider.value = String(clamped);
-      paintBarSlider(weightSlider, WEIGHT_BAR_COLOR);
-    });
-    weightCell.appendChild(input);
-    row.appendChild(weightCell);
-
-    // Sideways, slidable bar graph mirroring the enemy weight bars - dragging
-    // it edits the same weight as the number input above, in real time.
-    const weightBarCell = document.createElement("td");
-    const weightSlider = document.createElement("input");
-    weightSlider.type = "range";
-    weightSlider.className = `enemy-bar-slider ${WEIGHT_BAR_COLOR.cssClass}`;
-    weightSlider.min = "0";
-    weightSlider.max = String(Math.max(WEIGHT_BAR_BASELINE_MAX, Number(input.value) * 1.2));
-    weightSlider.step = "any";
-    weightSlider.value = String(input.value);
-    weightSlider.disabled = locked;
-    weightSlider.addEventListener("input", () => {
-      input.value = weightSlider.value;
-      input.dispatchEvent(new Event("input"));
-    });
-    paintBarSlider(weightSlider, WEIGHT_BAR_COLOR);
-    weightBarCell.appendChild(weightSlider);
-    row.appendChild(weightBarCell);
-
-    // Dungeon size settings live on the interior itself (not per-level), so
-    // these 3 columns edit the same value regardless of which level is shown.
-    const dungeon = state.dungeons.find((d) => d.name === interiorName);
-    for (const field of DUNGEON_SIZE_SETTING_FIELDS) {
-      const sizeCell = document.createElement("td");
-      const sizeInput = document.createElement("input");
-      sizeInput.type = "number";
-      sizeInput.step = "any";
-      sizeInput.value = dungeon?.sizeSettings?.[field.key] ?? "";
-      sizeInput.disabled = !dungeon || locked;
-      sizeInput.addEventListener("input", () => {
-        if (!dungeon) return;
-        if (!dungeon.sizeSettings) dungeon.sizeSettings = {};
-        dungeon.sizeSettings[field.key] = sizeInput.value;
-      });
-      sizeCell.appendChild(sizeInput);
-      row.appendChild(sizeCell);
-    }
-
-    const oddsCell = document.createElement("td");
-    oddsCell.className = "level-odds-cell";
-    oddsCell.dataset.interior = interiorName;
-    row.appendChild(oddsCell);
-
-    tbody.appendChild(row);
+  // Only show the blacklisted section (and its divider label) once
+  // something is actually blacklisted.
+  if (blacklistedNames.length > 0) {
+    const divider = document.createElement("tr");
+    divider.className = "section-divider";
+    const dividerCell = document.createElement("td");
+    dividerCell.colSpan = 9;
+    dividerCell.textContent = `Blacklisted (${blacklistedNames.length}) \u2014 weight forced to 0`;
+    divider.appendChild(dividerCell);
+    blacklistedTbody.insertBefore(divider, blacklistedTbody.firstChild);
+    blacklistedTbody.hidden = false;
+  } else {
+    blacklistedTbody.hidden = true;
   }
 
   updateLevelOddsColumn();
@@ -607,7 +673,7 @@ function updateLevelOddsColumn() {
   const level = state.levels[state.currentLevelIndex];
   if (!level) return;
   const odds = computeOddsForLevel(level.name, level.category);
-  for (const cell of document.querySelectorAll("#levelWeightsBody .level-odds-cell")) {
+  for (const cell of document.querySelectorAll("#levelWeightsTable .level-odds-cell")) {
     const percentage = odds[cell.dataset.interior] || 0;
     cell.textContent = formatPercentage(percentage);
     // Cross out interiors with a true 0% chance for this level (whether

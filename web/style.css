@@ -282,6 +282,48 @@ tr.section-divider td {
   white-space: nowrap;
 }
 
+#balanceSettingsBar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.75rem 1rem;
+  background: #202020;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+#balanceSettingsBar .subtitle {
+  margin: 0;
+}
+
+#balanceSettingsFields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.balance-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.balance-field label {
+  font-size: 0.8rem;
+  color: #9d9d9d;
+}
+
+.balance-field input[type="number"] {
+  width: 8rem;
+}
+
+#balanceBtn {
+  align-self: flex-start;
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
 .enemy-bars {
   display: flex;
   flex-direction: column;

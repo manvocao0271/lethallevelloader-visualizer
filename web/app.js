@@ -17,6 +17,7 @@ const state = {
   groupColors: {}, // { groupId: colorHex }
   nextGroupId: 1,
   lockedInteriors: {}, // { interiorName: true } - locked rows can't be edited by user or program
+  balanceSettings: null, // { lobbySize, tripsPerPlayer, minItemsPerTrip, maxItemsPerTrip, valuePerItem } - shared across all moons, persisted in localStorage
 };
 
 // Cycled through in order as new groups are created.
@@ -59,6 +60,142 @@ const ENEMY_BAR_COLORS = {
 
 // Color for the per-interior weight bar graph on the "Interior Weights by Level" table.
 const WEIGHT_BAR_COLOR = { accent: "#4a90d9", track: "#182a38", cssClass: "weight-bar-slider" };
+
+// --- Moon "Balance" tool --------------------------------------------------
+// Turns a shared assumption about how the crew plays (lobby size, how many
+// haul trips each player makes, how much they carry per trip, and a flat
+// credits-per-item baseline) into a Min/Max Scrap Item Spawns and Min/Max
+// Total Scrap Value for whichever moon is currently selected - using that
+// moon's own existing Enemy Power (risk) and Route Price (cost) as the
+// per-moon inputs, rather than asking you to re-type those too.
+//
+// Tunable knobs - adjust here if the output feels off for your pack; the
+// shape of the formula itself lives in computeBalancedScrapSettings().
+const BALANCE_SPAWN_BUFFER_MIN = 1.10; // headroom over worst-case hauling demand
+const BALANCE_SPAWN_BUFFER_MAX = 1.35; // headroom over best-case hauling demand
+const BALANCE_DANGER_REFERENCE_POWER = 20; // enemy power treated as "medium" danger
+const BALANCE_DANGER_VALUE_RANGE_MIN = 0.4; // value bonus at max danger, low end
+const BALANCE_DANGER_VALUE_RANGE_MAX = 1.0; // value bonus at max danger, high end
+const BALANCE_ROUTE_PRICE_BREAKEVEN = 1.25; // min value must clear cost x this much
+const BALANCE_VALUE_SPREAD_RATIO = 1.15; // max value stays >= min value x this
+const BALANCE_SETTINGS_STORAGE_KEY = "interiorWeightsEditor.balanceSettings";
+const BALANCE_SETTINGS_DEFAULTS = {
+  lobbySize: 4,
+  tripsPerPlayer: 3,
+  minItemsPerTrip: 2,
+  maxItemsPerTrip: 4,
+  valuePerItem: 60,
+};
+
+function loadBalanceSettings() {
+  try {
+    const raw = localStorage.getItem(BALANCE_SETTINGS_STORAGE_KEY);
+    if (raw) return { ...BALANCE_SETTINGS_DEFAULTS, ...JSON.parse(raw) };
+  } catch (e) {
+    // localStorage unavailable/blocked - fall back to defaults silently.
+  }
+  return { ...BALANCE_SETTINGS_DEFAULTS };
+}
+
+function saveBalanceSettings() {
+  try {
+    localStorage.setItem(BALANCE_SETTINGS_STORAGE_KEY, JSON.stringify(state.balanceSettings));
+  } catch (e) {
+    // Ignore - the shared settings just won't persist across reloads.
+  }
+}
+
+function readBalanceSettingsFromInputs() {
+  return {
+    lobbySize: parseFloat(document.getElementById("balanceLobbySize").value) || 0,
+    tripsPerPlayer: parseFloat(document.getElementById("balanceTripsPerPlayer").value) || 0,
+    minItemsPerTrip: parseFloat(document.getElementById("balanceMinItemsPerTrip").value) || 0,
+    maxItemsPerTrip: parseFloat(document.getElementById("balanceMaxItemsPerTrip").value) || 0,
+    valuePerItem: parseFloat(document.getElementById("balanceValuePerItem").value) || 0,
+  };
+}
+
+function populateBalanceSettingsInputs() {
+  document.getElementById("balanceLobbySize").value = state.balanceSettings.lobbySize;
+  document.getElementById("balanceTripsPerPlayer").value = state.balanceSettings.tripsPerPlayer;
+  document.getElementById("balanceMinItemsPerTrip").value = state.balanceSettings.minItemsPerTrip;
+  document.getElementById("balanceMaxItemsPerTrip").value = state.balanceSettings.maxItemsPerTrip;
+  document.getElementById("balanceValuePerItem").value = state.balanceSettings.valuePerItem;
+}
+
+// Pure function: crew assumptions + this moon's own enemy power/route price
+// in, this moon's 4 scrap settings out. Kept separate from the DOM so the
+// formula itself is easy to read/tune in isolation.
+function computeBalancedScrapSettings({
+  lobbySize,
+  tripsPerPlayer,
+  minItemsPerTrip,
+  maxItemsPerTrip,
+  valuePerItem,
+  enemyPower,
+  routePrice,
+}) {
+  const totalTrips = lobbySize * tripsPerPlayer;
+  const demandMin = totalTrips * minItemsPerTrip;
+  const demandMax = totalTrips * maxItemsPerTrip;
+
+  // Count is purely logistics-driven - enemy power never adjusts it.
+  const minSpawns = Math.max(1, Math.ceil(demandMin * BALANCE_SPAWN_BUFFER_MIN));
+  const maxSpawns = Math.max(minSpawns, Math.ceil(demandMax * BALANCE_SPAWN_BUFFER_MAX));
+
+  // Bounded 0-1 danger curve so a handful of very-high-power modded moons
+  // don't send the value multiplier to infinity.
+  const danger = enemyPower / (enemyPower + BALANCE_DANGER_REFERENCE_POWER);
+
+  const rawMinValue = minSpawns * valuePerItem * (1 + BALANCE_DANGER_VALUE_RANGE_MIN * danger);
+  const rawMaxValue = maxSpawns * valuePerItem * (1 + BALANCE_DANGER_VALUE_RANGE_MAX * danger);
+
+  // A min-roll run should still comfortably clear the cost of flying there.
+  const costFloor = Math.ceil(routePrice * BALANCE_ROUTE_PRICE_BREAKEVEN);
+  const minValue = Math.max(Math.round(rawMinValue), costFloor);
+  // Keeps a real min-max spread even when the cost floor dominates.
+  const maxValue = Math.max(Math.round(rawMaxValue), Math.ceil(minValue * BALANCE_VALUE_SPREAD_RATIO));
+
+  return { minSpawns, maxSpawns, minValue, maxValue };
+}
+
+function applyBalanceForCurrentMoon() {
+  const level = state.levels[state.currentLevelIndex];
+  if (!level) return;
+
+  const inputs = readBalanceSettingsFromInputs();
+  state.balanceSettings = inputs;
+  saveBalanceSettings();
+
+  if (inputs.lobbySize <= 0 || inputs.tripsPerPlayer <= 0 || inputs.maxItemsPerTrip <= 0 || inputs.valuePerItem <= 0) {
+    setStatus("Balance needs Lobby Size, Trips Per Player, Max Items Per Trip, and Base Value Per Item to all be greater than 0.");
+    return;
+  }
+  if (inputs.maxItemsPerTrip < inputs.minItemsPerTrip) {
+    setStatus("Max Items Per Trip must be \u2265 Min Items Per Trip.");
+    return;
+  }
+
+  const settings = state.levelSettingsByLevel[level.name] || {};
+  const enemyPower =
+    (parseFloat(settings["Enemy Settings - Maximum Inside Enemy Power Count"]) || 0) +
+    (parseFloat(settings["Enemy Settings - Maximum Outside, Daytime Enemy Power Count"]) || 0) +
+    (parseFloat(settings["Enemy Settings - Maximum Outside, Nighttime Enemy Power Count"]) || 0);
+  const routePrice = parseFloat(settings["General Settings - Planet Route Price"]) || 0;
+
+  const result = computeBalancedScrapSettings({ ...inputs, enemyPower, routePrice });
+
+  setLevelSetting(level.name, "Scrap Settings - Minimum Scrap Item Spawns", String(result.minSpawns));
+  setLevelSetting(level.name, "Scrap Settings - Maximum Scrap Item Spawns", String(result.maxSpawns));
+  setLevelSetting(level.name, "Scrap Settings - Minimum Total Scrap Value", String(result.minValue));
+  setLevelSetting(level.name, "Scrap Settings - Maximum Total Scrap Value", String(result.maxValue));
+
+  renderLevelSettingsPanel();
+  setStatus(
+    `Balanced "${level.name}": spawns ${result.minSpawns}-${result.maxSpawns}, value ${result.minValue}-${result.maxValue} ` +
+      `(enemy power ${enemyPower}, route price ${routePrice}).`
+  );
+}
 
 // Paints a slider's fill as a solid-color gradient up to its current value/max ratio.
 function paintBarSlider(slider, colors) {
@@ -824,5 +961,22 @@ document.getElementById("toggleLevelSettingsBtn").addEventListener("click", () =
   body.hidden = !body.hidden;
 });
 document.getElementById("resetLevelSettingsBtn").addEventListener("click", resetLevelSettingsToDefault);
+
+document.getElementById("balanceBtn").addEventListener("click", applyBalanceForCurrentMoon);
+for (const id of [
+  "balanceLobbySize",
+  "balanceTripsPerPlayer",
+  "balanceMinItemsPerTrip",
+  "balanceMaxItemsPerTrip",
+  "balanceValuePerItem",
+]) {
+  document.getElementById(id).addEventListener("change", () => {
+    state.balanceSettings = readBalanceSettingsFromInputs();
+    saveBalanceSettings();
+  });
+}
+
+state.balanceSettings = loadBalanceSettings();
+populateBalanceSettingsInputs();
 
 loadData();

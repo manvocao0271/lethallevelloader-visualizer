@@ -70,6 +70,34 @@
         <p class="subtitle">Configurable settings for the currently selected moon (route price, scrap, and enemy spawn options). Enabling any change here force-enables "Enable Content Configuration" for this level when downloaded.</p>
         <button id="resetLevelSettingsBtn">Reset Moon Settings to Default</button>
       </div>
+
+      <section id="balanceSettingsBar">
+        <p class="subtitle">Shared crew assumptions used by "Balance" on every moon (saved across reloads). Each moon's own Enemy Power and Route Price are read automatically.</p>
+        <div id="balanceSettingsFields">
+          <div class="balance-field">
+            <label for="balanceLobbySize">Lobby Size</label>
+            <input type="number" id="balanceLobbySize" min="1" step="any">
+          </div>
+          <div class="balance-field">
+            <label for="balanceTripsPerPlayer">Trips Per Player</label>
+            <input type="number" id="balanceTripsPerPlayer" min="0" step="any">
+          </div>
+          <div class="balance-field">
+            <label for="balanceMinItemsPerTrip">Min Items Per Trip</label>
+            <input type="number" id="balanceMinItemsPerTrip" min="0" step="any">
+          </div>
+          <div class="balance-field">
+            <label for="balanceMaxItemsPerTrip">Max Items Per Trip</label>
+            <input type="number" id="balanceMaxItemsPerTrip" min="0" step="any">
+          </div>
+          <div class="balance-field">
+            <label for="balanceValuePerItem">Base Value Per Item</label>
+            <input type="number" id="balanceValuePerItem" min="0" step="any">
+          </div>
+        </div>
+        <button id="balanceBtn">Balance Scrap Settings for This Moon</button>
+      </section>
+
       <div id="levelSettingsFields"></div>
     </div>
   </section>

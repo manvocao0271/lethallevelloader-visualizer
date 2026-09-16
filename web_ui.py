@@ -27,6 +27,7 @@ How to use:
 
 from __future__ import annotations
 
+import csv
 import json
 import re
 import webbrowser
@@ -40,6 +41,7 @@ ROOT_DIR = Path(__file__).resolve().parent
 WEB_DIR = ROOT_DIR / "web"
 SOURCE_CFG_PATH = ROOT_DIR / "copied_lethallevelloader.cfg"
 WEIGHTS_JSON_PATH = ROOT_DIR / "interior_weights.json"
+ENEMIES_CSV_PATH = ROOT_DIR / "enemies_catalogue.csv"
 
 ZERO_WIDTH_SPACE = "\u200b"
 SECTION_HEADER_RE = re.compile(r"^\[(?P<inner>.*)\]\s*$")
@@ -346,6 +348,40 @@ def apply_dungeon_size_setting_updates(lines: list[str], start: int, end: int, u
 # API handlers
 # ---------------------------------------------------------------------------
 
+def load_enemy_catalogue() -> list[dict[str, object]]:
+    """Reads enemies_catalogue.csv (columns: Enemy, Power Level, Inside,
+    Daytime, Nighttime) from next to this script. This is supplementary data
+    used only to decide which enemies get shown/backfilled in the "Moon
+    Settings" enemy spawn lists - a missing file or malformed rows are
+    skipped rather than crashing the whole app."""
+    if not ENEMIES_CSV_PATH.exists():
+        return []
+
+    def as_bool(raw: str | None) -> bool:
+        return (raw or "").strip().lower() == "true"
+
+    catalogue: list[dict[str, object]] = []
+    with ENEMIES_CSV_PATH.open(newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        reader.fieldnames = [(name or "").strip() for name in (reader.fieldnames or [])]
+        for row in reader:
+            name = (row.get("Enemy") or "").strip()
+            if not name:
+                continue
+            try:
+                power_level = float((row.get("Power Level") or "").strip())
+            except ValueError:
+                power_level = 0.0
+            catalogue.append({
+                "name": name,
+                "powerLevel": power_level,
+                "inside": as_bool(row.get("Inside")),
+                "daytime": as_bool(row.get("Daytime")),
+                "nighttime": as_bool(row.get("Nighttime")),
+            })
+    return catalogue
+
+
 def build_data_payload() -> dict[str, object]:
     lines = SOURCE_CFG_PATH.read_text(encoding="utf-8").splitlines()
     sections = parse_sections_from_lines(lines)
@@ -409,6 +445,7 @@ def build_data_payload() -> dict[str, object]:
         "defaultWeights": default_weights_payload,
         "levelSettings": level_settings_payload,
         "levelSettingsDefaults": level_settings_defaults_payload,
+        "enemyCatalogue": load_enemy_catalogue(),
     }
 
 

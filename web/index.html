@@ -27,14 +27,21 @@
     </div>
   </section>
 
+  <section id="levelPagination">
+    <button id="prevLevelBtn">&laquo; Prev</button>
+    <select id="levelSelect"></select>
+    <button id="nextLevelBtn">Next &raquo;</button>
+    <span id="levelPageLabel"></span>
+  </section>
+
   <section id="byLevelPanel">
     <button id="toggleByLevelBtn">Interior Weights by Level &#9662;</button>
     <div id="byLevelBody">
-      <section id="levelPagination">
-        <button id="prevLevelBtn">&laquo; Prev</button>
-        <select id="levelSelect"></select>
-        <button id="nextLevelBtn">Next &raquo;</button>
-        <span id="levelPageLabel"></span>
+      <section id="gordionSyncBar" hidden>
+        <div>
+          <button id="applyGordionWeightsBtn">Apply Gordion's Weights to All Other Moons</button>
+          <p class="subtitle">Copies each interior's current weight on Gordion onto every other moon (locked interiors are skipped, Gordion itself is left untouched).</p>
+        </div>
       </section>
 
       <section id="quickBalanceBar">
@@ -49,12 +56,12 @@
             <th>Lock</th>
             <th>Interior</th>
             <th>Weight</th>
-            <th>Weight Bar</th>
             <th>Min Size Mult.</th>
             <th>Max Size Mult.</th>
             <th>Restrict Size Scaler</th>
             <th>Odds for this level</th>
             <th>Cumulative Weight (all moons)</th>
+            <th>% of Total Weight</th>
           </tr>
         </thead>
         <tbody id="levelWeightsBody"></tbody>

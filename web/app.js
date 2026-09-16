@@ -18,6 +18,7 @@ const state = {
   nextGroupId: 1,
   lockedInteriors: {}, // { interiorName: true } - locked rows can't be edited by user or program
   balanceSettings: null, // { lobbySize, tripsPerPlayer, minItemsPerTrip, maxItemsPerTrip, valuePerItem } - shared across all moons, persisted in localStorage
+  enemyCatalogue: [], // [{ name, powerLevel, inside, daytime, nighttime }] from enemies_catalogue.csv
 };
 
 // Cycled through in order as new groups are created.
@@ -58,8 +59,18 @@ const ENEMY_BAR_COLORS = {
   "Enemy Settings - Outside Nighttime Enemies Spawning List": { accent: "#d1453b", track: "#3a1e1c", cssClass: "enemy-bar-red" },
 };
 
-// Color for the per-interior weight bar graph on the "Interior Weights by Level" table.
-const WEIGHT_BAR_COLOR = { accent: "#4a90d9", track: "#182a38", cssClass: "weight-bar-slider" };
+// Maps each enemy-list field to the matching boolean column in
+// enemies_catalogue.csv that decides whether an enemy belongs on that list.
+const ENEMY_FIELD_CATALOGUE_ATTR = {
+  "Enemy Settings - Inside Enemies Spawning List": "inside",
+  "Enemy Settings - Outside Daytime Enemies Spawning List": "daytime",
+  "Enemy Settings - Outside Nighttime Enemies Spawning List": "nighttime",
+};
+
+// Name of the moon whose interior weights act as the "template" copied onto
+// every other moon by the Gordion sync button, and the only moon on which
+// that button is shown.
+const GORDION_LEVEL_NAME = "Gordion";
 
 // --- Moon "Balance" tool --------------------------------------------------
 // Turns a shared assumption about how the crew plays (lobby size, how many
@@ -226,6 +237,35 @@ function serializeNamedWeightList(pairs) {
   return pairs.map(([name, weight]) => `${name}:${weight}`).join(",");
 }
 
+// Makes sure every enemy from enemies_catalogue.csv whose attribute for a
+// given list is true is actually present in that list's raw "Name:Weight"
+// string for this moon - anything missing is appended at weight 0 so it's
+// visible (and adjustable) instead of silently absent. Existing entries and
+// their weights - including for enemies not in the catalogue at all - are
+// left exactly as they are.
+function backfillEnemyListsForLevel(levelName) {
+  if (state.enemyCatalogue.length === 0) return;
+  const settings = state.levelSettingsByLevel[levelName];
+  if (!settings) return;
+  for (const [fieldKey, attr] of Object.entries(ENEMY_FIELD_CATALOGUE_ATTR)) {
+    const pairs = parseNamedWeightList(settings[fieldKey] || "");
+    const existingNames = new Set(pairs.map(([name]) => name));
+    let changed = false;
+    for (const enemy of state.enemyCatalogue) {
+      if (enemy[attr] && !existingNames.has(enemy.name)) {
+        pairs.push([enemy.name, 0]);
+        existingNames.add(enemy.name);
+        changed = true;
+      }
+    }
+    if (changed) settings[fieldKey] = serializeNamedWeightList(pairs);
+  }
+}
+
+function backfillAllEnemyLists() {
+  for (const level of state.levels) backfillEnemyListsForLevel(level.name);
+}
+
 function levelTags(category) {
   return category.startsWith("Vanilla") ? ["Vanilla"] : ["Custom", "Modded"];
 }
@@ -359,6 +399,8 @@ async function loadData() {
   for (const [levelName, settings] of Object.entries(data.levelSettingsDefaults || {})) {
     state.defaultLevelSettingsByLevel[levelName] = { ...settings };
   }
+  state.enemyCatalogue = data.enemyCatalogue || [];
+  backfillAllEnemyLists();
 
   populateLevelSelect();
   renderLevelPage();
@@ -446,14 +488,29 @@ function computeCumulativeWeight(interiorName) {
   return state.levels.reduce((sum, lvl) => sum + clampWeight(perLevel[lvl.name] || 0), 0);
 }
 
-function updateCumulativeCell(interiorName) {
-  const cell = document.querySelector(`.cumulative-weight-cell[data-interior="${CSS.escape(interiorName)}"]`);
-  if (cell) cell.textContent = String(computeCumulativeWeight(interiorName));
+function computeTotalCumulativeWeight() {
+  return state.interiorNames.reduce((sum, name) => sum + computeCumulativeWeight(name), 0);
+}
+
+// Percentage depends on the total across every interior, so a single
+// weight edit has to refresh every row's cumulative + percentage cells,
+// not just the row that changed.
+function updateCumulativeWeightCells() {
+  const total = computeTotalCumulativeWeight();
+  for (const cell of document.querySelectorAll(".cumulative-weight-cell")) {
+    cell.textContent = String(computeCumulativeWeight(cell.dataset.interior));
+  }
+  for (const cell of document.querySelectorAll(".cumulative-percentage-cell")) {
+    const value = computeCumulativeWeight(cell.dataset.interior);
+    cell.textContent = formatPercentage(total > 0 ? (value / total) * 100 : 0);
+  }
 }
 
 // Builds one <tr> for the "Interior Weights by Level" table. Shared by both
 // the whitelisted tbody and the blacklisted-section tbody below it.
-function buildInteriorRow(interiorName, level, WEIGHT_BAR_BASELINE_MAX) {
+// totalCumulativeWeight is computed once per render pass (not per row) since
+// every row's percentage cell needs the same shared total.
+function buildInteriorRow(interiorName, level, totalCumulativeWeight) {
   const row = document.createElement("tr");
   row.dataset.interior = interiorName;
   const locked = !!state.lockedInteriors[interiorName];
@@ -548,33 +605,10 @@ function buildInteriorRow(interiorName, level, WEIGHT_BAR_BASELINE_MAX) {
     if (!state.weightsByDungeonLevel[interiorName]) state.weightsByDungeonLevel[interiorName] = {};
     state.weightsByDungeonLevel[interiorName][level.name] = Number.isFinite(value) ? value : 0;
     updateLevelOddsColumn();
-    updateCumulativeCell(interiorName);
-    const clamped = Number.isFinite(value) ? value : 0;
-    weightSlider.max = String(Math.max(WEIGHT_BAR_BASELINE_MAX, clamped * 1.2));
-    weightSlider.value = String(clamped);
-    paintBarSlider(weightSlider, WEIGHT_BAR_COLOR);
+    updateCumulativeWeightCells();
   });
   weightCell.appendChild(input);
   row.appendChild(weightCell);
-
-  // Sideways, slidable bar graph mirroring the enemy weight bars - dragging
-  // it edits the same weight as the number input above, in real time.
-  const weightBarCell = document.createElement("td");
-  const weightSlider = document.createElement("input");
-  weightSlider.type = "range";
-  weightSlider.className = `enemy-bar-slider ${WEIGHT_BAR_COLOR.cssClass}`;
-  weightSlider.min = "0";
-  weightSlider.max = String(Math.max(WEIGHT_BAR_BASELINE_MAX, Number(input.value) * 1.2));
-  weightSlider.step = "any";
-  weightSlider.value = String(input.value);
-  weightSlider.disabled = locked || blacklisted;
-  weightSlider.addEventListener("input", () => {
-    input.value = weightSlider.value;
-    input.dispatchEvent(new Event("input"));
-  });
-  paintBarSlider(weightSlider, WEIGHT_BAR_COLOR);
-  weightBarCell.appendChild(weightSlider);
-  row.appendChild(weightBarCell);
 
   // Dungeon size settings live on the interior itself (not per-level), so
   // these 3 columns edit the same value regardless of which level is shown.
@@ -605,8 +639,19 @@ function buildInteriorRow(interiorName, level, WEIGHT_BAR_BASELINE_MAX) {
   const cumulativeCell = document.createElement("td");
   cumulativeCell.className = "cumulative-weight-cell";
   cumulativeCell.dataset.interior = interiorName;
-  cumulativeCell.textContent = String(computeCumulativeWeight(interiorName));
+  const cumulativeWeight = computeCumulativeWeight(interiorName);
+  cumulativeCell.textContent = String(cumulativeWeight);
   row.appendChild(cumulativeCell);
+
+  // Read-only: this interior's cumulative weight as a share of the total
+  // cumulative weight across every interior - also never editable here.
+  const cumulativePercentageCell = document.createElement("td");
+  cumulativePercentageCell.className = "cumulative-percentage-cell";
+  cumulativePercentageCell.dataset.interior = interiorName;
+  cumulativePercentageCell.textContent = formatPercentage(
+    totalCumulativeWeight > 0 ? (cumulativeWeight / totalCumulativeWeight) * 100 : 0
+  );
+  row.appendChild(cumulativePercentageCell);
 
   return row;
 }
@@ -625,18 +670,23 @@ function renderLevelPage() {
   tbody.innerHTML = "";
   blacklistedTbody.innerHTML = "";
 
-  // Fixed baseline scale for the weight bars so typical values (0-1000) stay
-  // readable; a row's own value can push its bar's max higher (e.g. vanilla
-  // dungeons occasionally use the game's 9999 weight cap) without squishing
-  // every other interior's bar down to an invisible sliver.
-  const WEIGHT_BAR_BASELINE_MAX = 1000;
+  // Cumulative-weight percentages are relative to the total across every
+  // interior, so this is computed once per render pass and shared by every
+  // row rather than recomputed per row.
+  const totalCumulativeWeight = computeTotalCumulativeWeight();
+
+  // The Gordion sync button only makes sense while viewing Gordion itself
+  // (it always reads Gordion's weights regardless of the current page, but
+  // showing it elsewhere invites clicking it out of context).
+  const gordionSyncBar = document.getElementById("gordionSyncBar");
+  if (gordionSyncBar) gordionSyncBar.hidden = level.name !== GORDION_LEVEL_NAME;
 
   // Blacklisted interiors are pulled out of the normal ordering entirely and
   // rendered into their own tbody below, rather than interspersed among the
   // whitelisted rows.
   const blacklistedNames = [];
   for (const interiorName of orderedInteriorNames()) {
-    const row = buildInteriorRow(interiorName, level, WEIGHT_BAR_BASELINE_MAX);
+    const row = buildInteriorRow(interiorName, level, totalCumulativeWeight);
     if (isBlacklisted(interiorName)) {
       blacklistedNames.push(interiorName);
       blacklistedTbody.appendChild(row);
@@ -755,6 +805,8 @@ function renderEnemyBars(container, barColors, levelName, fieldKey, textareaEl) 
     const label = document.createElement("span");
     label.className = "enemy-bar-label";
     label.textContent = name;
+    const catalogueEntry = state.enemyCatalogue.find((e) => e.name === name);
+    if (catalogueEntry) label.title = `Power Level: ${catalogueEntry.powerLevel}`;
     row.appendChild(label);
 
     const slider = document.createElement("input");
@@ -790,6 +842,7 @@ function resetLevelSettingsToDefault() {
   const level = state.levels[state.currentLevelIndex];
   if (!level) return;
   state.levelSettingsByLevel[level.name] = { ...(state.defaultLevelSettingsByLevel[level.name] || {}) };
+  backfillEnemyListsForLevel(level.name);
   renderLevelSettingsPanel();
   setStatus(`Reset "${level.name}"'s moon settings to their .cfg defaults.`);
 }
@@ -832,6 +885,7 @@ function applyResetToDefault() {
   for (const level of state.levels) {
     state.levelSettingsByLevel[level.name] = { ...(state.defaultLevelSettingsByLevel[level.name] || {}) };
   }
+  backfillAllEnemyLists();
   for (const dungeon of state.dungeons) {
     if (state.lockedInteriors[dungeon.name]) continue;
     dungeon.sizeSettings = { ...(dungeon.sizeSettingsDefaults || {}) };
@@ -844,6 +898,42 @@ function applyResetToDefault() {
 function applyCleanReferences() {
   state.cleanReferencesRequested = true;
   setStatus("Uninstalled level references will be removed on download.");
+}
+
+// Copies each interior's current weight on Gordion onto every OTHER moon,
+// overwriting whatever that interior's weight already was there. Locked
+// interiors are skipped entirely (their weights on every moon, Gordion
+// included, are left exactly as they are) - same convention as Reset to
+// Default and Quick Balance.
+function applyGordionWeightsToAllMoons() {
+  const gordionLevel = state.levels.find((l) => l.name === GORDION_LEVEL_NAME);
+  if (!gordionLevel) {
+    setStatus(`Could not find a "${GORDION_LEVEL_NAME}" moon among the loaded levels.`);
+    return;
+  }
+
+  let updatedInteriors = 0;
+  let skippedLocked = 0;
+  for (const interiorName of state.interiorNames) {
+    if (state.lockedInteriors[interiorName]) {
+      skippedLocked++;
+      continue;
+    }
+    const gordionWeight = (state.weightsByDungeonLevel[interiorName] || {})[gordionLevel.name] ?? 0;
+    if (!state.weightsByDungeonLevel[interiorName]) state.weightsByDungeonLevel[interiorName] = {};
+    for (const level of state.levels) {
+      if (level.name === gordionLevel.name) continue; // Gordion itself is the source, not a target.
+      state.weightsByDungeonLevel[interiorName][level.name] = gordionWeight;
+    }
+    updatedInteriors++;
+  }
+
+  renderLevelPage();
+  setStatus(
+    skippedLocked > 0
+      ? `Applied Gordion's weights to every other moon for ${updatedInteriors} unlocked interior(s) (${skippedLocked} locked interior(s) left untouched).`
+      : `Applied Gordion's weights to every other moon for ${updatedInteriors} interior(s).`
+  );
 }
 
 // Fills the given weight into every unlocked interior for the currently
@@ -935,12 +1025,26 @@ document.getElementById("resetBtn").addEventListener("click", applyResetToDefaul
 document.getElementById("cleanBtn").addEventListener("click", applyCleanReferences);
 document.getElementById("emptyDungeonInjectionsBtn").addEventListener("click", applyEmptyDungeonInjections);
 document.getElementById("quickBalanceBtn").addEventListener("click", applyQuickBalance);
+document.getElementById("applyGordionWeightsBtn").addEventListener("click", applyGordionWeightsToAllMoons);
 
 document.getElementById("prevLevelBtn").addEventListener("click", () => goToLevelPage(-1));
 document.getElementById("nextLevelBtn").addEventListener("click", () => goToLevelPage(1));
 document.getElementById("levelSelect").addEventListener("change", (e) => {
   state.currentLevelIndex = parseInt(e.target.value, 10);
   renderLevelPage();
+});
+
+// Left/Right arrow keys page between moons, same as the Prev/Next buttons -
+// skipped while focus is in a text field, textarea, or dropdown so typing a
+// number or editing the blacklist textarea isn't hijacked.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+  if (e.altKey || e.ctrlKey || e.metaKey) return;
+  const target = e.target;
+  const tag = target && target.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (target && target.isContentEditable)) return;
+  e.preventDefault();
+  goToLevelPage(e.key === "ArrowLeft" ? -1 : 1);
 });
 document.getElementById("toggleByLevelBtn").addEventListener("click", () => {
   const body = document.getElementById("byLevelBody");

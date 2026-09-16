@@ -1,0 +1,29 @@
+Enemy, Power Level, Inside, Daytime, Nighttime
+Stingray, 0.5, True, False, False
+Coil Head, 1, True, False, False
+Earth Leviathan, 2, False, False, True
+Bunker Spider, 2, True, False, False
+Circuit Bee, 1, False, True, False
+Old Bird, 3, False, False, True
+Feiopar, 2, False, False, True
+Spore Lizard, 1, True, False, False
+Nutcracker, 1, True, False, False
+Eyeless Dog, 2, False, False, True
+Masked, 1, True, False, False
+Jester, 3, True, False, False
+Hoarding Bug, 1, True, False, False
+Giantkiwi, 4, False, True, False
+Forest Keeper, 3, False, False, True
+Tulip Snake, 0.5, False, True, False
+Bracken, 3, True, False, False
+Ghost Girl, 2, True, False, False
+Manticoil, 1, False, True, False
+Roaming Locust, 1, False, True, False
+Thumper, 3, True, False, False
+Barber, 1, True, False, False
+Snare Flea, 1, True, False, False
+Maneater, 2, True, False, False,
+Cadaver Growths, 2, True, False, False
+Butler, 2, True, False, False
+Hygrodere, 1, True, False, False
+Baboon Hawk, 0.5, False, False, True

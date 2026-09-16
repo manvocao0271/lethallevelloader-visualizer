@@ -88,6 +88,23 @@ header h1 {
   font-weight: 600;
 }
 
+#gordionSyncBar {
+  padding: 0.75rem 1rem;
+  background: #202020;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+#gordionSyncBar .subtitle {
+  margin: 0.4rem 0 0 0;
+}
+
+#applyGordionWeightsBtn {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
 .checkbox {
   display: flex;
   align-items: center;
@@ -194,6 +211,12 @@ tr.section-divider td {
 
 .cumulative-weight-cell {
   color: #9d9d9d;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.cumulative-percentage-cell {
+  color: var(--accent);
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
@@ -401,11 +424,6 @@ tr.section-divider td {
 .enemy-bar-slider.enemy-bar-yellow { background: #3a3218; }
 .enemy-bar-slider.enemy-bar-green { background: #1c3620; }
 .enemy-bar-slider.enemy-bar-red { background: #3a1e1c; }
-.enemy-bar-slider.weight-bar-slider { background: #182a38; }
-
-#levelWeightsTable .enemy-bar-slider {
-  width: 8rem;
-}
 
 #levelWeightsBody tr.dragging {
   opacity: 0.4;

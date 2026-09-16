@@ -1,29 +1,29 @@
-Enemy, Power Level, Inside, Daytime, Nighttime
-Stingray, 0.5, True, False, False
-Coil Head, 1, True, False, False
+Enemy, Power Level, Inside, Daytime, Nighttime, Alias
+Backwater Gunkfish, 0.5, True, False, False, Stingray
+Coil-head, 1, True, False, False, Spring
 Earth Leviathan, 2, False, False, True
-Bunker Spider, 2, True, False, False
-Circuit Bee, 1, False, True, False
-Old Bird, 3, False, False, True
+Bunker spider, 2, True, False, False, Bunker Spider
+Circuit bees, 1, False, True, False, Red Locust Bees
+Old Bird, 3, False, False, True, RadMech
 Feiopar, 2, False, False, True
-Spore Lizard, 1, True, False, False
+Spore lizard, 1, True, False, False, Puffer
 Nutcracker, 1, True, False, False
-Eyeless Dog, 2, False, False, True
+Eyeless dog, 2, False, False, True, MouthDog
 Masked, 1, True, False, False
 Jester, 3, True, False, False
-Hoarding Bug, 1, True, False, False
-Giantkiwi, 4, False, True, False
-Forest Keeper, 3, False, False, True
+Hoarding bug, 1, True, False, False
+Giant Sapsucker, 4, False, True, False, GiantKiwi
+Forest Keeper, 3, False, False, True, ForestGiant
 Tulip Snake, 0.5, False, True, False
-Bracken, 3, True, False, False
-Ghost Girl, 2, True, False, False
+Bracken, 3, True, False, False, Flowerman
+Girl, 2, True, False, False
 Manticoil, 1, False, True, False
-Roaming Locust, 1, False, True, False
-Thumper, 3, True, False, False
-Barber, 1, True, False, False
-Snare Flea, 1, True, False, False
-Maneater, 2, True, False, False,
+Roaming locusts, 1, False, True, False, Docile Locust Bees
+Thumper, 3, True, False, False, Crawler
+Barber, 1, True, False, False, Clay Surgeon
+Snare flea, 1, True, False, Centipede
+Cave Dweller, 2, True, False, False, Maneater
 Cadaver Growths, 2, True, False, False
 Butler, 2, True, False, False
-Hygrodere, 1, True, False, False
-Baboon Hawk, 0.5, False, False, True
+Hygrodere, 1, True, False, False, Blob
+Baboon hawk, 0.5, False, False, True
